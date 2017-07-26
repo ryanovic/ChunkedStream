@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace ChunkedStream
+namespace ChunkedStream.Chunks
 {
     public interface IChunk : IDisposable
     {

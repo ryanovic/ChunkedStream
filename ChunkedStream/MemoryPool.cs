@@ -5,6 +5,8 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
+using ChunkedStream.Chunks;
+
 namespace ChunkedStream
 {
     public sealed unsafe class MemoryPool
@@ -15,11 +17,11 @@ namespace ChunkedStream
         private static int GetShiftForNum(int num)
         {
             int shift = 2;
-            while (1 << shift <= num) { shift++; }
+            while (1 << shift < num) { shift++; }
             return shift;
         }
 
-        private readonly SpinLock _lock = new SpinLock(enableThreadOwnerTracking: false);
+        private readonly object _syncRoot = new object();
 
         // chunkSize is forced to be equal 1 << chunkSizeShift (2 ^ chunkSizeShift)
         private readonly int _chunkSize;
@@ -55,10 +57,17 @@ namespace ChunkedStream
 
         public MemoryPool(int chunkSize = 4096, int chunkCount = 1000)
         {
+            if (chunkSize <= 0)
+                throw new ArgumentException("chunkSize should be positive integer", "chunkSize");
+
+            if (chunkCount <= 0)
+                throw new ArgumentException("chunkCount should be positive integer", "chunkCount");
+
             // align chunkSize to be 2^chunkSizeShift
             _chunkSizeShift = GetShiftForNum(chunkSize);
             _chunkSize = 1 << _chunkSizeShift;
             _chunkCount = chunkCount;
+
             _top = 0;
             // create buffer
             InitializeBuffer();
@@ -66,26 +75,25 @@ namespace ChunkedStream
 
         private void InitializeBuffer()
         {
-            int current = 0;
             _buffer = new byte[_chunkSize * _chunkCount];
 
-            // initialize each chunk to have reference to the next free chunk in its first 4 bytes
             fixed (byte* pbuff = &_buffer[0])
             {
-                while (current < _chunkCount - 1)
+                // initialize each chunk to have reference to the next free chunk in its first 4 bytes
+                for (int i = 0; i < _chunkCount; i++)
                 {
-                    // _buffer[current] = _buffer[current + 1]
-                    *(int*)(pbuff + (current << _chunkSizeShift)) = ++current;
+                    *(int*)(pbuff + (i << _chunkSizeShift)) = (i < _chunkCount - 1) ? i + 1 : InvalidHandler;
                 }
-                // _buffer[_chunkCount - 1] = -1
-                *(int*)(pbuff + (current << _chunkSizeShift)) = InvalidHandler;
             }
         }
 
         public IChunk TryGetChunkFromPool()
         {
             int handle = TryGetFreeChunkHandle();
-            return handle == InvalidHandler ? null : new MemoryPoolChunk(this, handle);
+
+            return handle == InvalidHandler
+                ? null
+                : new MemoryPoolChunk(this, handle);
         }
 
         public IChunk GetChunk()
@@ -103,23 +111,17 @@ namespace ChunkedStream
 
         private int TryGetFreeChunkHandle(byte* pbuff)
         {
-            int index = InvalidHandler; bool lockTaken = false;
-
-            try
+            lock (_syncRoot)
             {
-                _lock.Enter(ref lockTaken);
+                int index = _top;
 
-                if (_top != InvalidHandler)
+                if (index != InvalidHandler)
                 {
-                    index = _top;
                     _top = *(int*)(pbuff + (index << _chunkSizeShift));
                 }
+
+                return index;
             }
-            finally
-            {
-                if (lockTaken) _lock.Exit(useMemoryBarrier: false);
-            }
-            return index;
         }
 
         public void VerifyHandle(int handle)
@@ -140,21 +142,11 @@ namespace ChunkedStream
 
         private void ReleaseChunkHandle(byte* pbuff, ref int handle)
         {
-            bool lockTaken = false;
-            try
+            lock (_syncRoot)
             {
-                _lock.Enter(ref lockTaken);
-
-                if (_top != -1)
-                {
-                    *(int*)(pbuff + (handle << _chunkSizeShift)) = _top;
-                }
+                *(int*)(pbuff + (handle << _chunkSizeShift)) = _top;
                 _top = handle;
                 handle = InvalidHandler;
-            }
-            finally
-            {
-                if (lockTaken) _lock.Exit(useMemoryBarrier: false);
             }
         }
 

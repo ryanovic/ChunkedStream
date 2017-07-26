@@ -41,10 +41,10 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="IChunk.cs" />
-    <Compile Include="MemoryChunk.cs" />
+    <Compile Include="Chunks\IChunk.cs" />
+    <Compile Include="Chunks\MemoryChunk.cs" />
     <Compile Include="MemoryPool.cs" />
-    <Compile Include="MemoryPoolChunk.cs" />
+    <Compile Include="Chunks\MemoryPoolChunk.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
