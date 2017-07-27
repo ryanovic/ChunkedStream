@@ -34,9 +34,12 @@ namespace ChunkedStream.Chunks
             }
         }
 
-        public MemoryChunk(int length)
+        public MemoryChunk(int chunkSize)
         {
-            _buffer = new byte[length];
+            if (chunkSize <= 0 || chunkSize > MemoryPool.MaxChunkSize)
+                throw new ArgumentException($"chunkSize must be positive and less than or equal 2^30", "chunkSize");
+
+            _buffer = new byte[chunkSize];
         }
 
         public void Dispose()

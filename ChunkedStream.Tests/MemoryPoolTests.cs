@@ -23,6 +23,7 @@ namespace ChunkedStream.Tests
                 new { ChunkSize = 5, ChunkCount = 1, Expected = 8 },
                 new { ChunkSize = 510, ChunkCount = 1, Expected = 512 },
                 new { ChunkSize = 1024, ChunkCount = 1, Expected = 1024 },
+                new { ChunkSize = 4000, ChunkCount = 1, Expected = 4096 },
                 new { ChunkSize = 4000, ChunkCount = 1, Expected = 4096 }};
 
             foreach (var @case in cases)
@@ -43,9 +44,9 @@ namespace ChunkedStream.Tests
 
                 for (int i = 0; i < @case.ChunkCount; i++)
                 {
-                    Assert.AreEqual(i, memPool.TryGetFreeChunkHandle());
+                    Assert.AreEqual(i, memPool.TryGetChunkHandle());
                 }
-                Assert.AreEqual(-1, memPool.TryGetFreeChunkHandle());
+                Assert.AreEqual(-1, memPool.TryGetChunkHandle());
             }
         }
 
@@ -58,7 +59,8 @@ namespace ChunkedStream.Tests
                 new { ChunkSize = 4, ChunkCount = 0},
                 new { ChunkSize = 4, ChunkCount = -1},
                 new { ChunkSize = 0, ChunkCount = 0},
-                new { ChunkSize = -1, ChunkCount = -1}};
+                new { ChunkSize = -1, ChunkCount = -1},
+                new { ChunkSize = Int32.MaxValue, ChunkCount = Int32.MaxValue}};
 
             foreach (var @case in cases)
             {
@@ -88,6 +90,40 @@ namespace ChunkedStream.Tests
                     Assert.IsInstanceOfType(memPool.GetChunk(), typeof(MemoryPoolChunk));
                 }
                 Assert.IsInstanceOfType(memPool.GetChunk(), typeof(MemoryChunk));
+                Assert.AreEqual(@case.ChunkCount, memPool.TotalAllocated);
+            }
+        }
+
+        [TestMethod]
+        public void MemoryPool_TryGetChunkFromPool_AfterRelease()
+        {
+            var cases = Enumerable.Range(1, 10).Select(i => new { ChunkCount = i, ChunkSize = 1 });
+
+            foreach (var @case in cases)
+            {
+                var memPool = new MemoryPool(chunkSize: @case.ChunkSize, chunkCount: @case.ChunkCount);
+
+                var chunks = new List<IChunk>(@case.ChunkCount);
+
+                for (int i = 0; i < @case.ChunkCount; i++)
+                {
+                    var chunk = memPool.GetChunk();
+                    Assert.IsInstanceOfType(chunk, typeof(MemoryPoolChunk));
+                    chunks.Add(chunk);
+                }
+                Assert.IsNull(memPool.TryGetChunkFromPool());
+                Assert.AreEqual(@case.ChunkCount, memPool.TotalAllocated);
+
+                chunks.ForEach(chunk => chunk.Dispose());
+                Assert.AreEqual(0, memPool.TotalAllocated);
+
+                for (int i = 0; i < @case.ChunkCount; i++)
+                {
+                    var chunk = memPool.GetChunk();
+                    Assert.IsInstanceOfType(chunk, typeof(MemoryPoolChunk));                    
+                }
+                Assert.IsNull(memPool.TryGetChunkFromPool());
+                Assert.AreEqual(@case.ChunkCount, memPool.TotalAllocated);
             }
         }
 
@@ -105,30 +141,35 @@ namespace ChunkedStream.Tests
                     Assert.IsInstanceOfType(memPool.TryGetChunkFromPool(), typeof(MemoryPoolChunk));
                 }
                 Assert.IsNull(memPool.TryGetChunkFromPool());
+                Assert.AreEqual(@case.ChunkCount, memPool.TotalAllocated);
             }
         }
 
         [TestMethod]
-        public void MemoryPool_PopPushPoolChunk()
+        public void MemoryPool_TryGetChunkHandle()
         {
             var memPool = new MemoryPool(chunkSize: 4, chunkCount: 2);
 
-            int handle1 = memPool.TryGetFreeChunkHandle();
-            int handle2 = memPool.TryGetFreeChunkHandle();
+            int handle1 = memPool.TryGetChunkHandle();
+            int handle2 = memPool.TryGetChunkHandle();
 
             Assert.AreEqual(0, handle1);
             Assert.AreEqual(1, handle2);
-            Assert.AreEqual(-1, memPool.TryGetFreeChunkHandle());
+            Assert.AreEqual(-1, memPool.TryGetChunkHandle());
 
             memPool.ReleaseChunkHandle(ref handle1);
             Assert.AreEqual(-1, handle1);
-            Assert.AreEqual(0, memPool.TryGetFreeChunkHandle());
-            Assert.AreEqual(-1, memPool.TryGetFreeChunkHandle());
+            Assert.AreEqual(1, memPool.TotalAllocated);
+            Assert.AreEqual(0, memPool.TryGetChunkHandle());
+            Assert.AreEqual(-1, memPool.TryGetChunkHandle());
 
             memPool.ReleaseChunkHandle(ref handle2);
             Assert.AreEqual(-1, handle2);
-            Assert.AreEqual(1, memPool.TryGetFreeChunkHandle());
-            Assert.AreEqual(-1, memPool.TryGetFreeChunkHandle());
+            Assert.AreEqual(1, memPool.TotalAllocated);
+            Assert.AreEqual(1, memPool.TryGetChunkHandle());
+            Assert.AreEqual(-1, memPool.TryGetChunkHandle());
+
+            Assert.AreEqual(2, memPool.TotalAllocated);
         }
 
         [TestMethod]
@@ -178,6 +219,7 @@ namespace ChunkedStream.Tests
             })).ToArray();
 
             Parallel.Invoke(actions);
+            Assert.AreEqual(0, memPool.TotalAllocated);
         }
     }
 }

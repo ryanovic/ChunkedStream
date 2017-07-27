@@ -38,12 +38,15 @@ namespace ChunkedStream.Chunks
 
         public MemoryPoolChunk(MemoryPool owner, int handle)
         {
+            if (owner == null)
+                throw new ArgumentNullException("owner");
+
             _owner = owner;
             _handle = handle;
             _offset = owner.GetChunkOffset(handle);
         }
 
-        private void ReleaseChunkHandle()
+        private void ReleaseHandle()
         {
             if (_handle != MemoryPool.InvalidHandler)
             {
@@ -53,13 +56,13 @@ namespace ChunkedStream.Chunks
 
         public void Dispose()
         {
-            ReleaseChunkHandle();
+            ReleaseHandle();
             GC.SuppressFinalize(this);
         }
 
         ~MemoryPoolChunk()
         {
-            ReleaseChunkHandle();
+            ReleaseHandle();
 
         }
     }

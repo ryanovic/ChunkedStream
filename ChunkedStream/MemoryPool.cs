@@ -12,6 +12,7 @@ namespace ChunkedStream
     public sealed unsafe class MemoryPool
     {
         public const int InvalidHandler = -1;
+        public const int MaxChunkSize = 1 << 30;
 
         // returns minimal i (for i >= 2) such that 2^i >= num
         private static int GetShiftForNum(int num)
@@ -30,6 +31,7 @@ namespace ChunkedStream
 
         private byte[] _buffer;
         private int _top;
+        private int _totalAllocated = 0;
 
         public byte[] Buffer
         {
@@ -55,17 +57,29 @@ namespace ChunkedStream
             }
         }
 
+        public int TotalAllocated
+        {
+            get
+            {
+                return _totalAllocated;
+            }
+        }
+
         public MemoryPool(int chunkSize = 4096, int chunkCount = 1000)
         {
-            if (chunkSize <= 0)
-                throw new ArgumentException("chunkSize should be positive integer", "chunkSize");
-
-            if (chunkCount <= 0)
-                throw new ArgumentException("chunkCount should be positive integer", "chunkCount");
+            if (chunkSize <= 0 || chunkSize > MaxChunkSize)
+                throw new ArgumentException($"chunkSize must be positive and less than or equal 2^30", "chunkSize");
 
             // align chunkSize to be 2^chunkSizeShift
             _chunkSizeShift = GetShiftForNum(chunkSize);
             _chunkSize = 1 << _chunkSizeShift;
+
+            int maxChunkCount = Int32.MaxValue >> _chunkSizeShift;
+
+            if (chunkCount <= 0 || chunkCount > maxChunkCount)
+                throw new ArgumentException($"chunkCount must be positive and less than or equal {maxChunkCount} for chunks with 2^{_chunkSizeShift} size", "chunkCount");
+
+
             _chunkCount = chunkCount;
 
             _top = 0;
@@ -89,7 +103,7 @@ namespace ChunkedStream
 
         public IChunk TryGetChunkFromPool()
         {
-            int handle = TryGetFreeChunkHandle();
+            int handle = TryGetChunkHandle();
 
             return handle == InvalidHandler
                 ? null
@@ -101,33 +115,25 @@ namespace ChunkedStream
             return TryGetChunkFromPool() ?? new MemoryChunk(ChunkSize);
         }
 
-        public int TryGetFreeChunkHandle()
+        public int TryGetChunkHandle()
         {
+            int handle = InvalidHandler;
+
             fixed (byte* pbuff = &_buffer[0])
             {
-                return TryGetFreeChunkHandle(pbuff);
-            }
-        }
-
-        private int TryGetFreeChunkHandle(byte* pbuff)
-        {
-            lock (_syncRoot)
-            {
-                int index = _top;
-
-                if (index != InvalidHandler)
+                lock (_syncRoot)
                 {
-                    _top = *(int*)(pbuff + (index << _chunkSizeShift));
+                    if (_top != InvalidHandler)
+                    {
+                        handle = _top;
+                        _top = *(int*)(pbuff + (handle << _chunkSizeShift));
+                        _totalAllocated++;
+                    }
                 }
-
-                return index;
             }
-        }
 
-        public void VerifyHandle(int handle)
-        {
-            if (handle < 0 || handle >= _chunkCount)
-                throw new InvalidOperationException($"Invalid Handle ({handle})");
+            ZerroChunk(handle);
+            return handle;
         }
 
         public void ReleaseChunkHandle(ref int handle)
@@ -136,17 +142,14 @@ namespace ChunkedStream
 
             fixed (byte* pbuff = &_buffer[0])
             {
-                ReleaseChunkHandle(pbuff, ref handle);
-            }
-        }
+                lock (_syncRoot)
+                {
+                    *(int*)(pbuff + (handle << _chunkSizeShift)) = _top;
+                    _top = handle;
+                    _totalAllocated--;
 
-        private void ReleaseChunkHandle(byte* pbuff, ref int handle)
-        {
-            lock (_syncRoot)
-            {
-                *(int*)(pbuff + (handle << _chunkSizeShift)) = _top;
-                _top = handle;
-                handle = InvalidHandler;
+                    handle = InvalidHandler;
+                }
             }
         }
 
@@ -155,6 +158,20 @@ namespace ChunkedStream
             VerifyHandle(handle);
 
             return handle << _chunkSizeShift;
+        }
+
+        public void VerifyHandle(int handle)
+        {
+            if (handle < 0 || handle >= _chunkCount)
+                throw new InvalidOperationException($"Invalid Handle ({handle})");
+        }
+
+        private void ZerroChunk(int handle)
+        {
+            if (handle != -1)
+            {
+                Array.Clear(Buffer, handle << _chunkSizeShift, _chunkSize);
+            }
         }
     }
 }
