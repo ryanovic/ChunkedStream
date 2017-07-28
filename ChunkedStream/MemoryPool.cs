@@ -12,15 +12,6 @@ namespace ChunkedStream
     public sealed unsafe class MemoryPool
     {
         public const int InvalidHandler = -1;
-        public const int MaxChunkSize = 1 << 30;
-
-        // returns minimal i (for i >= 2) such that 2^i >= num
-        private static int GetShiftForNum(int num)
-        {
-            int shift = 2;
-            while (1 << shift < num) { shift++; }
-            return shift;
-        }
 
         private readonly object _syncRoot = new object();
 
@@ -67,23 +58,16 @@ namespace ChunkedStream
 
         public MemoryPool(int chunkSize = 4096, int chunkCount = 1000)
         {
-            if (chunkSize <= 0 || chunkSize > MaxChunkSize)
-                throw new ArgumentException($"chunkSize must be positive and less than or equal 2^30", "chunkSize");
-
-            // align chunkSize to be 2^chunkSizeShift
-            _chunkSizeShift = GetShiftForNum(chunkSize);
-            _chunkSize = 1 << _chunkSizeShift;
+            _chunkSize = ChunkHelper.AlignChunkSize(chunkSize, out _chunkSizeShift);
 
             int maxChunkCount = Int32.MaxValue >> _chunkSizeShift;
 
             if (chunkCount <= 0 || chunkCount > maxChunkCount)
                 throw new ArgumentException($"chunkCount must be positive and less than or equal {maxChunkCount} for chunks with 2^{_chunkSizeShift} size", "chunkCount");
 
-
             _chunkCount = chunkCount;
 
             _top = 0;
-            // create buffer
             InitializeBuffer();
         }
 

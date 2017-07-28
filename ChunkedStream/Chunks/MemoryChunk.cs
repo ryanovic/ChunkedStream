@@ -8,7 +8,7 @@ namespace ChunkedStream.Chunks
 {
     public sealed class MemoryChunk : IChunk
     {
-        private readonly byte[] _buffer;
+        private byte[] _buffer;
 
         public byte[] Buffer
         {
@@ -36,14 +36,15 @@ namespace ChunkedStream.Chunks
 
         public MemoryChunk(int chunkSize)
         {
-            if (chunkSize <= 0 || chunkSize > MemoryPool.MaxChunkSize)
-                throw new ArgumentException($"chunkSize must be positive and less than or equal 2^30", "chunkSize");
+            if (chunkSize < 0)
+                throw new ArgumentException($"chunkSize must be non-negative", "chunkSize");
 
             _buffer = new byte[chunkSize];
         }
 
         public void Dispose()
         {
+            _buffer = null;
         }
     }
 }
