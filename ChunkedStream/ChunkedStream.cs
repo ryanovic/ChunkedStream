@@ -7,7 +7,7 @@ using ChunkedStream.Chunks;
 
 namespace ChunkedStream
 {
-    public sealed class ChunkedStream : Stream
+    public unsafe sealed class ChunkedStream : Stream
     {
         private const int DefaultMemoryChunkSize = 512;
         private const int DefaultChunksLength = 4;
@@ -222,8 +222,8 @@ namespace ChunkedStream
         {
             if (count == 0) return 0;
 
-            VerifyInputBuffer(buffer, offset, count);
             VerifyStreamNotInState(ChunkedStreamState.Closed);
+            VerifyInputBuffer(buffer, offset, count);
 
             int chunkOffset, totalRead = 0;
 
@@ -284,13 +284,70 @@ namespace ChunkedStream
             return value;
         }
 
+        #region Unsafe Write \ CopyTo
+
+        // write specified count of bytes from *psource
+        internal void Write(byte* psource, int count)
+        {
+            if (count == 0) return;
+
+            VerifyStreamInState(ChunkedStreamState.ReadWrite);
+
+            while (count > 0)
+            {
+                int chunkOffset;
+                var chunk = GetChunkForWrite(out chunkOffset);
+
+                fixed (byte* ptarget = &chunk.Buffer[chunk.Offset + chunkOffset])
+                {
+                    int toWrite = Math.Min(count, _chunkSize - chunkOffset);
+                    Buffer.MemoryCopy(psource, ptarget, toWrite, toWrite);
+
+                    _position = checked(_position + toWrite);
+                    psource += toWrite;
+                    count -= toWrite;
+                }
+            }
+            _length = Math.Max(_length, _position);
+        }
+
+        // copy whole stream into *ptarget
+        internal void CopyTo(byte* ptarget)
+        {
+            if (_length == 0 || _chunks == null) return;
+
+            VerifyStreamInState(ChunkedStreamState.ReadWrite);
+
+            int chunkLength, lastChunkIndex = GetChunkIndexWithOffset(_length, out chunkLength);
+
+            for (int i = 0; i < lastChunkIndex; i++)
+            {
+                ChunkCopy(_chunks[i], 0, _chunkSize, ptarget + (i << _chunkSizeShift));
+            }
+
+            ChunkCopy(_chunks[lastChunkIndex], 0, chunkLength, ptarget + (lastChunkIndex << _chunkSizeShift));
+        }
+
+        private void ChunkCopy(IChunk source, int start, int count, byte* ptarget)
+        {
+            if (source != null && count > 0)
+            {
+                fixed (byte* psource = &source.Buffer[source.Offset + start])
+                {
+                    Buffer.MemoryCopy(psource, ptarget, count, count);
+                }
+            }
+        }
+
+        #endregion
+
         // copy bytes from buffer provided
         public override void Write(byte[] buffer, int offset, int count)
         {
             if (count == 0) return;
 
-            VerifyInputBuffer(buffer, offset, count);
             VerifyStreamInState(ChunkedStreamState.ReadWrite);
+            VerifyInputBuffer(buffer, offset, count);
 
             while (count > 0)
             {
@@ -363,7 +420,7 @@ namespace ChunkedStream
 
         #region Asserts
 
-        private static void VerifyInputBuffer(byte[] buffer, int offset, int count)
+        internal static void VerifyInputBuffer(Array buffer, int offset, int count)
         {
             if (buffer == null)
                 throw new ArgumentNullException("buffer");

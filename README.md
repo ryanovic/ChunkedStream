@@ -41,3 +41,7 @@ stream.Read(_);
 stream.Read(_);
 //...
 ```
+
+## ChunkedStringWriter
+
+`TextWriter` implementation using `ChunkedStream` as internal storage

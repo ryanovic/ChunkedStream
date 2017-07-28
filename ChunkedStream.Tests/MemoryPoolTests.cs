@@ -193,7 +193,7 @@ namespace ChunkedStream.Tests
         }
 
         [TestMethod]
-        public void MemoryPool_AsParallel()
+        public void MemoryPool_InParallel()
         {
             int threadCount = 8, attempts = 100, num = 100;
 

@@ -161,7 +161,7 @@ namespace ChunkedStream.Tests
         }
 
         [TestMethod]
-        public void ChunkedStream_ReadWrite_WhenGlobalPool_AsParallel()
+        public void ChunkedStream_ReadWrite_WhenGlobalPool_InParallel()
         {
             try
             {
