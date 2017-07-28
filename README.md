@@ -33,7 +33,6 @@ stream.Write(_);
 stream.Write(_);
 //...
 
-// move stream at the beginning
 // only sequential read operations will be available after this point
 stream.AsOutputStream();
 
