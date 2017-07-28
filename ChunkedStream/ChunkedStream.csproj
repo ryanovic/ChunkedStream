@@ -44,7 +44,6 @@
   <ItemGroup>
     <Compile Include="ChunkedStream.cs" />
     <Compile Include="ChunkedStreamState.cs" />
-    <Compile Include="Chunks\ChunkHelper.cs" />
     <Compile Include="Chunks\IChunk.cs" />
     <Compile Include="Chunks\MemoryChunk.cs" />
     <Compile Include="MemoryPool.cs" />

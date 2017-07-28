@@ -1,8 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace ChunkedStream.Chunks
 {
@@ -16,6 +14,9 @@ namespace ChunkedStream.Chunks
         {
             get
             {
+                if (_handle == MemoryPool.InvalidHandler)
+                    throw new ObjectDisposedException(null);
+
                 return _owner.Buffer;
             }
         }
@@ -24,6 +25,9 @@ namespace ChunkedStream.Chunks
         {
             get
             {
+                if (_handle == MemoryPool.InvalidHandler)
+                    throw new ObjectDisposedException(null);
+
                 return _offset;
             }
         }
@@ -32,6 +36,9 @@ namespace ChunkedStream.Chunks
         {
             get
             {
+                if (_handle == MemoryPool.InvalidHandler)
+                    throw new ObjectDisposedException(null);
+
                 return _owner.ChunkSize;
             }
         }
@@ -46,7 +53,7 @@ namespace ChunkedStream.Chunks
             _offset = owner.GetChunkOffset(handle);
         }
 
-        private void ReleaseHandle()
+        private void Release()
         {
             if (_handle != MemoryPool.InvalidHandler)
             {
@@ -56,13 +63,13 @@ namespace ChunkedStream.Chunks
 
         public void Dispose()
         {
-            ReleaseHandle();
+            Release();
             GC.SuppressFinalize(this);
         }
 
         ~MemoryPoolChunk()
         {
-            ReleaseHandle();
+            Release();
 
         }
     }

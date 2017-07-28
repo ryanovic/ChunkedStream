@@ -1,8 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace ChunkedStream.Chunks
 {
@@ -14,6 +12,9 @@ namespace ChunkedStream.Chunks
         {
             get
             {
+                if (_buffer == null)
+                    throw new ObjectDisposedException(null);
+
                 return _buffer;
             }
         }
@@ -30,6 +31,9 @@ namespace ChunkedStream.Chunks
         {
             get
             {
+                if (_buffer == null)
+                    throw new ObjectDisposedException(null);
+
                 return _buffer.Length;
             }
         }

@@ -173,7 +173,7 @@ namespace ChunkedStream.Tests
                     foreach (int count in Enumerable.Range(1, 32))
                     {
                         byte[] buffer = Enumerable.Range(0, 1024).Select(i => (byte)i).ToArray();
-                        using (var stream = ChunkedStream.FromPool())
+                        using (var stream = new ChunkedStream())
                         {
                             for (int i = 0; i < buffer.Length; i += count)
                             {
@@ -380,7 +380,7 @@ namespace ChunkedStream.Tests
 
                 Assert.AreEqual(1, pool.TotalAllocated);
                 Assert.AreEqual(5, stream.Length);
-                
+
                 stream.SetLength(4);
                 Assert.AreEqual(0, pool.TotalAllocated);
                 Assert.AreEqual(4, stream.Length);
@@ -443,6 +443,93 @@ namespace ChunkedStream.Tests
 
                 stream.Position = 1000;
                 Assert.AreEqual(-1, stream.ReadByte());
+            }
+        }
+
+        [TestMethod]
+        public void ChunkedStream_AsOutputStream()
+        {
+            var pool = new MemoryPool(chunkSize: 4, chunkCount: 4);
+
+            using (var stream = ChunkedStream.FromPool(pool))
+            {
+                byte[] buffer = new byte[4] { 255, 255, 255, 255 };
+
+                for (int i = 0; i < 8; i++)
+                {
+                    stream.Position = i * 4;
+
+                    if (i % 2 == 0)
+                    {
+                        stream.Write(buffer, 0, buffer.Length);
+                    }
+                }
+                Assert.AreEqual(4, pool.TotalAllocated);
+
+                // skip 1 full chunk
+                stream.AsOutputStream(fromPosition: 4);
+                Assert.AreEqual(3, pool.TotalAllocated);
+
+                // read 2 null chunk by byte
+                for (int i = 0; i < 4; i++)
+                {
+                    Assert.AreEqual(0, stream.ReadByte());
+                }
+                Assert.AreEqual(3, pool.TotalAllocated);
+
+                // read 3 full chunk by byte
+                for (int i = 0; i < 4; i++)
+                {
+                    Assert.AreEqual(255, stream.ReadByte());
+                }
+                Assert.AreEqual(2, pool.TotalAllocated);
+
+                // skip 4, 5 chunks by seek
+                stream.Seek(8, SeekOrigin.Current);
+                Assert.AreEqual(1, pool.TotalAllocated);
+
+                // read 6 null chunk
+                Array.Clear(buffer, 0, buffer.Length);
+                stream.Read(buffer, 0, buffer.Length);
+
+                Assert.AreEqual(0, buffer.Select(x => (int)x).Sum());
+                Assert.AreEqual(1, pool.TotalAllocated);
+
+                // read 7 full chunk
+                Array.Clear(buffer, 0, buffer.Length);
+                stream.Read(buffer, 0, buffer.Length);
+
+                Assert.AreEqual(1020, buffer.Select(x => (int)x).Sum());
+                Assert.AreEqual(0, pool.TotalAllocated);
+
+                // complete stream
+                Assert.AreEqual(-1, stream.ReadByte());
+                Assert.AreEqual(0, stream.Read(buffer, 0, buffer.Length));
+
+                Assert.AreEqual(28, stream.Length);
+                Assert.AreEqual(28, stream.Position);
+            }
+        }
+
+        [TestMethod]
+        public void ChunkedStream_AsOutputStream_WhenDefault()
+        {
+            var pool = new MemoryPool(chunkSize: 4, chunkCount: 4);
+
+            using (var stream = ChunkedStream.FromPool(pool))
+            {
+                byte[] buffer = new byte[4] { 255, 255, 255, 255 };
+                stream.Write(buffer, 0, buffer.Length);
+
+                stream.AsOutputStream();
+                Assert.AreEqual(1, pool.TotalAllocated);
+                Assert.AreEqual(0, stream.Position);
+
+                Array.Clear(buffer, 0, buffer.Length);
+                
+                Assert.AreEqual(4, stream.Read(buffer, 0, buffer.Length));
+                Assert.AreEqual(1020, buffer.Select(x => (int)x).Sum());
+                Assert.AreEqual(0, pool.TotalAllocated);
             }
         }
     }
