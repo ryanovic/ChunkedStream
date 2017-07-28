@@ -1,7 +1,7 @@
 # ChunkedStream
 .Net stream implementation using memory chunks for data store.
 
-Optionally memory pool can be created to store chunks within shared byte array in the LOH. In case when memory pool is used, but has no free chunks available - managed heap will be used instead automatically, so data can be processed without any delays.
+Optionally memory pool can be created to store chunks within shared byte array in the LOH. In case when memory pool is used, but has no free chunks available - new chunks will be created in the managed heap instead automatically, so data can be processed without a delay.
 
 ## Requirements
 .Net Framework 4.6.2
