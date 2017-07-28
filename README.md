@@ -17,7 +17,7 @@ var stream = new ChunkedStream()
 ```
 In case when `ChunkedStream` is created without / before `MemoryPool` is initialized - managed heap will be used instead.
 
-You also have two more options to customize `ChunkedStream` behaviour - first, is to force to ignore chunk pool even it's initialized by calling the following factory method:
+You also have two more options to customize `ChunkedStream` behaviour - first is to ignore chunk pool even it's initialized by calling the following factory method:
 ```c#
 var stream = ChunkedStream.FromMemory()
 ```
