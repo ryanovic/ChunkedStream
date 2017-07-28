@@ -33,6 +33,23 @@ namespace ChunkedStream.Tests
         }
 
         [TestMethod]
+        public void ChunkedStringWriter_WriteSingleChar()
+        {
+            var pool = new MemoryPool(4, 2);
+            var stream = new ChunkedStream(pool);
+
+            using (var writer = new ChunkedStringWriter(stream))
+            {
+                writer.Write('x');
+
+                Assert.AreEqual(2, stream.Length);
+                Assert.AreEqual("x", writer.ToString());
+            }
+
+            Assert.AreEqual(0, pool.TotalAllocated);
+        }
+
+        [TestMethod]
         public void ChunkedStringWriter_WriteNewLine()
         {
             var pool = new MemoryPool(4, 2);

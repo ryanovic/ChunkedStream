@@ -314,18 +314,26 @@ namespace ChunkedStream
         // copy whole stream into *ptarget
         internal void CopyTo(byte* ptarget)
         {
-            if (_length == 0 || _chunks == null) return;
+            if (_length <= _position || _chunks == null) return;
 
             VerifyStreamInState(ChunkedStreamState.ReadWrite);
 
-            int chunkLength, lastChunkIndex = GetChunkIndexWithOffset(_length, out chunkLength);
+            int offset, firstChunkIndex = GetChunkIndexWithOffset(_position, out offset);
+            int length, lastChunkIndex = GetChunkIndexWithOffset(_length, out length);
 
-            for (int i = 0; i < lastChunkIndex; i++)
+            ChunkCopy(_chunks[firstChunkIndex], offset, (int)Math.Min(_length - _position, _chunkSize - offset), ptarget + (firstChunkIndex << _chunkSizeShift));
+
+            if (firstChunkIndex != lastChunkIndex)
             {
-                ChunkCopy(_chunks[i], 0, _chunkSize, ptarget + (i << _chunkSizeShift));
+                for (int i = firstChunkIndex + 1; i < lastChunkIndex; i++)
+                {
+                    ChunkCopy(_chunks[i], 0, _chunkSize, ptarget + (i << _chunkSizeShift));
+                }
+
+                ChunkCopy(_chunks[lastChunkIndex], 0, length, ptarget + (lastChunkIndex << _chunkSizeShift));
             }
 
-            ChunkCopy(_chunks[lastChunkIndex], 0, chunkLength, ptarget + (lastChunkIndex << _chunkSizeShift));
+            _position = _length;
         }
 
         private void ChunkCopy(IChunk source, int start, int count, byte* ptarget)

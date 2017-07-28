@@ -131,6 +131,8 @@ namespace ChunkedStream
             if (_stream.Length == 0)
                 return String.Empty;
 
+            _stream.Position = 0;
+
             var str = new String((char)0, checked((int)(_stream.Length / 2)));
 
             fixed (char* pstr = str)
