@@ -133,7 +133,7 @@ namespace ChunkedStream
 
             _stream.Position = 0;
 
-            var str = new String((char)0, checked((int)(_stream.Length / 2)));
+            var str = new String((char)0, (int)(_stream.Length / 2));
 
             fixed (char* pstr = str)
             {
