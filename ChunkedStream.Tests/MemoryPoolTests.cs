@@ -14,26 +14,6 @@ namespace ChunkedStream.Tests
     public class MemoryPoolTests
     {
         [TestMethod]
-        public void MemoryPool_ChunkSize()
-        {
-            var cases = new[] {
-                new { ChunkSize = 1, ChunkCount = 1, Expected = 4 },
-                new { ChunkSize = 3, ChunkCount = 1, Expected = 4 },
-                new { ChunkSize = 4, ChunkCount = 1, Expected = 4 },
-                new { ChunkSize = 5, ChunkCount = 1, Expected = 8 },
-                new { ChunkSize = 510, ChunkCount = 1, Expected = 512 },
-                new { ChunkSize = 1024, ChunkCount = 1, Expected = 1024 },
-                new { ChunkSize = 4000, ChunkCount = 1, Expected = 4096 },
-                new { ChunkSize = 4000, ChunkCount = 1, Expected = 4096 }};
-
-            foreach (var @case in cases)
-            {
-                var memPool = new MemoryPool(chunkSize: @case.ChunkSize, chunkCount: @case.ChunkCount);
-                Assert.AreEqual(@case.Expected, memPool.ChunkSize);
-            }
-        }
-
-        [TestMethod]
         public void MemoryPool_ChunkCount()
         {
             var cases = Enumerable.Range(1, 10).Select(i => new { ChunkCount = i, ChunkSize = 4 });
@@ -97,7 +77,7 @@ namespace ChunkedStream.Tests
         [TestMethod]
         public void MemoryPool_TryGetChunkFromPool_AfterRelease()
         {
-            var cases = Enumerable.Range(1, 10).Select(i => new { ChunkCount = i, ChunkSize = 1 });
+            var cases = Enumerable.Range(1, 10).Select(i => new { ChunkCount = i, ChunkSize = 4 });
 
             foreach (var @case in cases)
             {
@@ -120,7 +100,7 @@ namespace ChunkedStream.Tests
                 for (int i = 0; i < @case.ChunkCount; i++)
                 {
                     var chunk = memPool.GetChunk();
-                    Assert.IsInstanceOfType(chunk, typeof(MemoryPoolChunk));                    
+                    Assert.IsInstanceOfType(chunk, typeof(MemoryPoolChunk));
                 }
                 Assert.IsNull(memPool.TryGetChunkFromPool());
                 Assert.AreEqual(@case.ChunkCount, memPool.TotalAllocated);

@@ -205,7 +205,7 @@ namespace ChunkedStream.Tests
             }
             finally
             {
-                ChunkedStream.DisablePool();
+                ChunkedStream.SetMemoryPool(null);
             }
         }
 
@@ -530,6 +530,19 @@ namespace ChunkedStream.Tests
                 Assert.AreEqual(4, stream.Read(buffer, 0, buffer.Length));
                 Assert.AreEqual(1020, buffer.Select(x => (int)x).Sum());
                 Assert.AreEqual(0, pool.TotalAllocated);
+            }
+        }
+
+        [TestMethod]
+        public void ChunkedStream_GetBytes()
+        {
+            var pool = new MemoryPool(chunkSize: 4, chunkCount: 4);
+
+            using (var stream = ChunkedStream.FromPool(pool))
+            {
+                byte[] buffer = new byte[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 };
+                stream.Write(buffer, 0, buffer.Length);
+
             }
         }
     }

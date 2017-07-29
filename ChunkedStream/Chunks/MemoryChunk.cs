@@ -40,8 +40,8 @@ namespace ChunkedStream.Chunks
 
         public MemoryChunk(int chunkSize)
         {
-            if (chunkSize < 0)
-                throw new ArgumentException($"chunkSize must be non-negative", "chunkSize");
+            if (chunkSize <= 0)
+                throw new ArgumentException($"chunkSize must be greater than 0", "chunkSize");
 
             _buffer = new byte[chunkSize];
         }

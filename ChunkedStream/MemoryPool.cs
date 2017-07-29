@@ -9,24 +9,11 @@ namespace ChunkedStream
     public sealed unsafe class MemoryPool
     {
         public const int InvalidHandler = -1;
-        public const int MaxChunkSize = 1 << 30;
-
-        // returns minimal i (for i >= 2) such that 2^i >= num
-        internal static int GetShiftForChunkSize(int chunkSize)
-        {
-            if (chunkSize <= 0 || chunkSize > MaxChunkSize)
-                throw new ArgumentOutOfRangeException("chunkSize", "chunkSize must be positive and less than or equal 2^30");
-
-            int shift = 2;
-            while (1 << shift < chunkSize) { shift++; }
-            return shift;
-        }
+        public const int MinChunkSize = 4;
 
         private readonly object _syncRoot = new object();
 
-        // chunkSize is forced to be equal 1 << chunkSizeShift (2 ^ chunkSizeShift)
         private readonly int _chunkSize;
-        private readonly int _chunkSizeShift;
         private readonly int _chunkCount;
 
         private byte[] _buffer;
@@ -67,14 +54,13 @@ namespace ChunkedStream
 
         public MemoryPool(int chunkSize = 4096, int chunkCount = 1000)
         {
-            _chunkSizeShift = GetShiftForChunkSize(chunkSize);
-            _chunkSize = 1 << _chunkSizeShift;
+            if (chunkSize < MinChunkSize)
+                throw new ArgumentOutOfRangeException($"Chunk Size must be positive and greater than or equal {MinChunkSize}", "chunkCount");
 
-            int maxChunkCount = Int32.MaxValue >> _chunkSizeShift;
+            if (chunkCount <= 0 || chunkCount > (Int32.MaxValue / chunkSize))
+                throw new ArgumentOutOfRangeException($"Chunk Count must be positive and less than or equal {Int32.MaxValue / chunkSize} for chunks with {chunkSize} size", "chunkCount");
 
-            if (chunkCount <= 0 || chunkCount > maxChunkCount)
-                throw new ArgumentException($"chunkCount must be positive and less than or equal {maxChunkCount} for chunks with 2^{_chunkSizeShift} size", "chunkCount");
-
+            _chunkSize = chunkSize;
             _chunkCount = chunkCount;
 
             _top = 0;
@@ -90,7 +76,7 @@ namespace ChunkedStream
                 // initialize each chunk to have reference to the next free chunk in its first 4 bytes
                 for (int i = 0; i < _chunkCount; i++)
                 {
-                    *(int*)(pbuff + (i << _chunkSizeShift)) = (i < _chunkCount - 1) ? i + 1 : InvalidHandler;
+                    *(int*)(pbuff + (i * _chunkSize)) = (i < _chunkCount - 1) ? i + 1 : InvalidHandler;
                 }
             }
         }
@@ -120,7 +106,7 @@ namespace ChunkedStream
                     if (_top != InvalidHandler)
                     {
                         handle = _top;
-                        _top = *(int*)(pbuff + (handle << _chunkSizeShift));
+                        _top = *(int*)(pbuff + (handle * _chunkSize));
                         _totalAllocated++;
                     }
                 }
@@ -138,7 +124,7 @@ namespace ChunkedStream
             {
                 lock (_syncRoot)
                 {
-                    *(int*)(pbuff + (handle << _chunkSizeShift)) = _top;
+                    *(int*)(pbuff + (handle * _chunkSize)) = _top;
                     _top = handle;
                     _totalAllocated--;
 
@@ -150,7 +136,7 @@ namespace ChunkedStream
         public int GetChunkOffset(int handle)
         {
             VerifyHandle(handle);
-            return handle << _chunkSizeShift;
+            return handle * _chunkSize;
         }
 
         public void VerifyHandle(int handle)
@@ -163,7 +149,7 @@ namespace ChunkedStream
         {
             if (handle != -1)
             {
-                Array.Clear(Buffer, handle << _chunkSizeShift, _chunkSize);
+                Array.Clear(Buffer, handle * _chunkSize, _chunkSize);
             }
         }
     }

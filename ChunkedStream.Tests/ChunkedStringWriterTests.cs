@@ -114,12 +114,14 @@ namespace ChunkedStream.Tests
             var pool = new MemoryPool(4, 2);
             var stream = new ChunkedStream(pool);
 
+            var zerro = new char[] { };
             var a = new char[] { 'a' };
             var b = new char[] { 'b', 'c' };
             var c = new char[] { 'd', 'e', 'f', 'g' };
 
             using (var writer = new ChunkedStringWriter(stream))
             {
+                writer.Write(zerro, 0, 0);
                 writer.Write(a, 0, 0);
                 writer.Write(a, 0, 1);
                 writer.Write(b, 0, 1);

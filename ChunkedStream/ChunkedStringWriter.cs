@@ -9,10 +9,10 @@ namespace ChunkedStream
     public unsafe sealed class ChunkedStringWriter : TextWriter
     {
         private static byte[] _newLine = Encoding.Unicode.GetBytes(Environment.NewLine);
+        private static Encoding _encoding = new UnicodeEncoding(false, false);
 
         private bool _disposed = false;
 
-        private Encoding _unicode;
         private ChunkedStream _stream;
         private bool _leaveOpen;
 
@@ -41,21 +41,30 @@ namespace ChunkedStream
         {
         }
 
+        public ChunkedStream Stream
+        {
+            get
+            {
+                return _stream;
+            }
+        }
+
         public override Encoding Encoding
         {
             get
             {
-                if (_unicode == null)
-                    _unicode = new UnicodeEncoding(false, false);
-
-                return _unicode;
+                return _encoding;
             }
         }
 
         public override void Write(char value)
         {
+            #region Validate
+
             if (_disposed)
                 throw new ObjectDisposedException(null);
+
+            #endregion
 
             _stream.WriteByte((byte)(value & 0x00FF));
             _stream.WriteByte((byte)(value >> 8));
@@ -63,10 +72,14 @@ namespace ChunkedStream
 
         public override void Write(char[] buffer)
         {
+            #region Validate
+
             if (_disposed)
                 throw new ObjectDisposedException(null);
 
-            if (buffer != null)
+            #endregion
+
+            if (buffer != null && buffer.Length > 0)
             {
                 fixed (char* pbuff = buffer)
                 {
@@ -75,25 +88,62 @@ namespace ChunkedStream
             }
         }
 
-        public override void Write(char[] buffer, int offset, int count)
+        public void Write(char* pbuff, int count)
         {
-            if (count == 0) return;
+            #region Validate
 
             if (_disposed)
                 throw new ObjectDisposedException(null);
 
-            ChunkedStream.VerifyInputBuffer(buffer, offset, count);
+            if (count < 0)
+                throw new ArgumentOutOfRangeException(nameof(count));
 
-            fixed (char* pbuffer = &buffer[offset])
+            #endregion
+
+            if (count > 0)
             {
-                _stream.Write((byte*)pbuffer, count * 2);
+                _stream.Write((byte*)pbuff, count * 2);
+            }
+        }
+
+        public override void Write(char[] buffer, int index, int count)
+        {
+            #region Validate
+
+            if (_disposed)
+                throw new ObjectDisposedException(null);
+
+            if (buffer == null)
+                throw new NullReferenceException(nameof(buffer));
+
+            if (index < 0)
+                throw new ArgumentOutOfRangeException(nameof(index));
+
+            if (count < 0)
+                throw new ArgumentOutOfRangeException(nameof(count));
+
+            if (index + count > buffer.Length)
+                throw new ArgumentOutOfRangeException(nameof(index) + " + " + nameof(count));
+
+            #endregion            
+
+            if (count > 0)
+            {
+                fixed (char* pbuff = &buffer[index])
+                {
+                    _stream.Write((byte*)pbuff, count * 2);
+                }
             }
         }
 
         public override void Write(string value)
         {
+            #region Validate
+
             if (_disposed)
                 throw new ObjectDisposedException(null);
+
+            #endregion
 
             if (!String.IsNullOrEmpty(value))
             {
@@ -106,8 +156,12 @@ namespace ChunkedStream
 
         public override void WriteLine()
         {
+            #region Validate
+
             if (_disposed)
                 throw new ObjectDisposedException(null);
+
+            #endregion
 
             _stream.Write(_newLine, 0, _newLine.Length);
         }
@@ -125,11 +179,14 @@ namespace ChunkedStream
 
         public override string ToString()
         {
+            #region Validate
+
             if (_disposed)
                 throw new ObjectDisposedException(null);
 
-            if (_stream.Length == 0)
-                return String.Empty;
+            #endregion
+
+            if (_stream.Length == 0) return String.Empty;
 
             _stream.Position = 0;
 
@@ -137,7 +194,7 @@ namespace ChunkedStream
 
             fixed (char* pstr = str)
             {
-                _stream.CopyTo((byte*)pstr);
+                _stream.Read((byte*)pstr, str.Length * 2);
             }
 
             return str;
