@@ -438,7 +438,7 @@ namespace ChunkedStream
         }
 
         // gets stream bytes
-        public byte[] GetBytes()
+        public byte[] ToArray()
         {
             #region Validate
 
@@ -450,11 +450,11 @@ namespace ChunkedStream
 
             #endregion
 
-            return GetBytes(0, (int)Length);
+            return ToArray(0, (int)Length);
         }
 
         // gets specified number of bytes from the stream started from provided offset
-        public byte[] GetBytes(int offset, int count)
+        public byte[] ToArray(int offset, int count)
         {
             #region Validate
 
