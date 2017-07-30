@@ -534,7 +534,7 @@ namespace ChunkedStream.Tests
         }
 
         [TestMethod]
-        public void ChunkedStream_GetBytes()
+        public void ChunkedStream_ToaArray()
         {
             var pool = new MemoryPool(chunkSize: 4, chunkCount: 4);
 
@@ -543,6 +543,28 @@ namespace ChunkedStream.Tests
                 byte[] buffer = new byte[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 };
                 stream.Write(buffer, 0, buffer.Length);
 
+                Array.Clear(buffer, 0, buffer.Length);
+                stream.ToArray().SequenceEqual(buffer);
+            }
+        }
+
+        [TestMethod]
+        public void ChunkedStream_ToaArray_WhenManyCalls()
+        {
+            var pool = new MemoryPool(chunkSize: 4, chunkCount: 4);
+
+            using (var stream = ChunkedStream.FromPool(pool))
+            {
+                byte[] buffer = new byte[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 };
+                stream.Write(buffer, 0, buffer.Length);
+
+                var array = stream.ToArray(0, 0)
+                    .Concat(stream.ToArray(0, 4))
+                    .Concat(stream.ToArray(4, 4))
+                    .Concat(stream.ToArray(8, 5));
+
+                Array.Clear(buffer, 0, buffer.Length);
+                array.SequenceEqual(buffer);
             }
         }
     }
