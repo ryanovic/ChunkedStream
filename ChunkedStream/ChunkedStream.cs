@@ -314,6 +314,19 @@ namespace ChunkedStream
             return 0;
         }
 
+        // reads bytes from the stream
+        public int Read(byte[] buffer)
+        {
+            if (buffer != null && buffer.Length > 0)
+            {
+                fixed (byte* pbuff = buffer)
+                {
+                    return Read(pbuff, buffer.Length);
+                }
+            }
+            return 0;
+        }
+
         // gets byte from the stream
         public override int ReadByte()
         {
@@ -413,16 +426,6 @@ namespace ChunkedStream
         // puts bytes from buffer on the stream
         public void Write(byte[] buffer)
         {
-            #region Validate
-
-            if (_state == ChunkedStreamState.Closed)
-                throw new ObjectDisposedException(null);
-
-            if (_state == ChunkedStreamState.ReadForward)
-                throw new InvalidOperationException();
-
-            #endregion
-
             if (buffer != null && buffer.Length > 0)
             {
                 fixed (byte* pbuff = buffer)
