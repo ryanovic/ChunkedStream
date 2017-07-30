@@ -157,6 +157,7 @@ namespace ChunkedStream.Tests
             var pool = new MemoryPool(4, 2);
             var stream = new ChunkedStream(pool);
 
+            var zerro = new char[] { };
             var a = new char[] { 'a' };
             var b = new char[] { 'b', 'c' };
             var c = new char[] { 'd', 'e', 'f', 'g' };
@@ -164,6 +165,15 @@ namespace ChunkedStream.Tests
             using (var writer = new ChunkedStringWriter(stream))
             {
                 var expected = new System.IO.StringWriter();
+
+                writer.Write(zerro);
+                expected.Write(zerro);
+
+                writer.Write((string)null);
+                expected.Write((string)null);
+
+                writer.Write((char[])null);
+                expected.Write((char[])null);
 
                 writer.Write(1);
                 expected.Write(1);
