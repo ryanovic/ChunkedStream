@@ -8,9 +8,6 @@ namespace ChunkedStream
 {
     public unsafe sealed class ChunkedStringWriter : TextWriter
     {
-        private static byte[] _newLine = Encoding.Unicode.GetBytes(Environment.NewLine);
-        private static Encoding _encoding = new UnicodeEncoding(false, false);
-
         private bool _disposed = false;
 
         private ChunkedStream _stream;
@@ -53,7 +50,7 @@ namespace ChunkedStream
         {
             get
             {
-                return _encoding;
+                return new UnicodeEncoding(false, false);
             }
         }
 
@@ -156,14 +153,7 @@ namespace ChunkedStream
 
         public override void WriteLine()
         {
-            #region Validate
-
-            if (_disposed)
-                throw new ObjectDisposedException(null);
-
-            #endregion
-
-            _stream.Write(_newLine, 0, _newLine.Length);
+            Write(NewLine);
         }
 
         // base.WriteLine join value & NewLine first

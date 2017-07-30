@@ -618,9 +618,16 @@ namespace ChunkedStream
         // get chunk index and offset corresponding position provided
         private int GetChunkIndexWithOffset(long position, out int offset)
         {
-            int chunkIndex = checked((int)(position / _chunkSize));
-            offset = (int)(position % _chunkSize);
-            return chunkIndex;
+            if (position < _chunkSize)
+            {
+                offset = (int)position;
+                return 0;
+            }
+            else
+            {
+                offset = (int)(position % _chunkSize);
+                return checked((int)(position / _chunkSize));
+            }
         }
 
         #endregion

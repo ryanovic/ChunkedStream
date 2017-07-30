@@ -219,5 +219,19 @@ namespace ChunkedStream.Tests
             Parallel.Invoke(actions);
             Assert.AreEqual(0, pool.TotalAllocated);
         }
+
+        [TestMethod]
+        public void ChunkedStringWriter_OverrideNewLine()
+        {
+            using (var writer = new ChunkedStringWriter())
+            {
+                writer.NewLine = "<CR>";
+                writer.WriteLine("line1");
+                writer.WriteLine("line2");
+                writer.Write("line3");
+
+                Assert.AreEqual("line1<CR>line2<CR>line3", writer.ToString());
+            }
+        }
     }
 }
