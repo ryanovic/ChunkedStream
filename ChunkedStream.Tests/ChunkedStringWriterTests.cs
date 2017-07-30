@@ -233,5 +233,68 @@ namespace ChunkedStream.Tests
                 Assert.AreEqual("line1<CR>line2<CR>line3", writer.ToString());
             }
         }
+
+        [TestMethod]
+        public void ChunkedStringWriter_WithStreamReader()
+        {
+            var pool = new MemoryPool(chunkSize: 4, chunkCount: 4);
+
+            using (var stream = new ChunkedStream(pool, asOutputStreamOnDispose: true))
+            {
+
+                System.Text.Encoding encoding;
+
+                using (var writer = new ChunkedStringWriter(stream))
+                {
+                    encoding = writer.Encoding;
+
+                    writer.WriteLine("line1");
+                    writer.WriteLine("line2");
+                    writer.WriteLine("line3");
+                }
+
+                Assert.AreEqual(ChunkedStreamState.ReadForward, stream.State);
+                Assert.AreEqual(0, stream.Position);
+
+                using (var reader = new System.IO.StreamReader(stream, encoding))
+                {
+                    Assert.AreEqual("line1", reader.ReadLine());
+                    Assert.AreEqual("line2", reader.ReadLine());
+                    Assert.AreEqual("line3", reader.ReadLine());
+                }
+
+                Assert.AreEqual(ChunkedStreamState.Closed, stream.State);
+            }
+        }
+
+        [TestMethod]
+        public void ChunkedStringWriter_WithStringReader()
+        {
+            var pool = new MemoryPool(chunkSize: 4, chunkCount: 4);
+
+            using (var stream = new ChunkedStream(pool))
+            {
+
+                string content;
+
+                using (var writer = new ChunkedStringWriter(stream))
+                {
+                    writer.WriteLine("line1");
+                    writer.WriteLine("line2");
+                    writer.WriteLine("line3");
+
+                    content = writer.ToString();
+                }
+
+                Assert.AreEqual(ChunkedStreamState.Closed, stream.State);
+
+                using (var reader = new System.IO.StringReader(content))
+                {
+                    Assert.AreEqual("line1", reader.ReadLine());
+                    Assert.AreEqual("line2", reader.ReadLine());
+                    Assert.AreEqual("line3", reader.ReadLine());
+                }
+            }
+        }
     }
 }
