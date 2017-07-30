@@ -526,7 +526,7 @@ namespace ChunkedStream.Tests
                 Assert.AreEqual(0, stream.Position);
 
                 Array.Clear(buffer, 0, buffer.Length);
-                
+
                 Assert.AreEqual(4, stream.Read(buffer, 0, buffer.Length));
                 Assert.AreEqual(1020, buffer.Select(x => (int)x).Sum());
                 Assert.AreEqual(0, pool.TotalAllocated);
@@ -565,6 +565,32 @@ namespace ChunkedStream.Tests
 
                 Array.Clear(buffer, 0, buffer.Length);
                 array.SequenceEqual(buffer);
+            }
+        }
+
+        [TestMethod]
+        public void ChunkedStream_AsOutputStreamOnDispose()
+        {
+            var pool = new MemoryPool(chunkSize: 4, chunkCount: 4);
+
+            using (var stream = new ChunkedStream(pool, asOutputStreamOnDispose: true))
+            {
+                using (var writer = new StreamWriter(stream))
+                {
+                    writer.Write("hello world");
+                }
+
+                Assert.AreEqual(0, stream.Position);
+                Assert.AreEqual(ChunkedStreamState.ReadForward, stream.State);
+                Assert.AreEqual(3, pool.TotalAllocated);
+
+                using (var reader = new StreamReader(stream))
+                {
+                    Assert.AreEqual("hello world", reader.ReadToEnd());
+                    Assert.AreEqual(0, pool.TotalAllocated);
+                }
+
+                Assert.AreEqual(ChunkedStreamState.Closed, stream.State);
             }
         }
     }

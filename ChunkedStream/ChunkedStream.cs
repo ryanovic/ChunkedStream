@@ -25,7 +25,7 @@ namespace ChunkedStream
         /// <summary>
         /// Initializes new global pool will be shared by all ChunkedStream instances by default.
         /// </summary>
-        /// <param name="chunkSize">Chunk Size - will be aligned to nearest 2^n value.</param>
+        /// <param name="chunkSize">Chunk Size</param>
         /// <param name="chunkCount">Chunk count in pool.</param>
         public static void InitializePool(int chunkSize = 4096, int chunkCount = 1000)
         {
@@ -38,14 +38,15 @@ namespace ChunkedStream
         /// <summary>
         /// Creates a new instance of ChunkedStream which will use chunks from managed heap only.
         /// </summary>
-        /// <param name="memoryChunkSize">Chunk Size - will be aligned to nearest 2^n value.</param>
+        /// <param name="memoryChunkSize">Chunk Size</param>
+        /// <param name="asOutputStreamOnDispose">When set - stream will be moved to ReadForward state on first Dispose call</param>
         /// <returns></returns>
-        public static ChunkedStream FromMemory(int memoryChunkSize = DefaultMemoryChunkSize)
+        public static ChunkedStream FromMemory(int memoryChunkSize = DefaultMemoryChunkSize, bool asOutputStreamOnDispose = false)
         {
             if (memoryChunkSize < MemoryPool.MinChunkSize)
                 throw new ArgumentException($"Chunk Size must be positive and greater than or equal {MemoryPool.MinChunkSize}", "memoryChunkSize");
 
-            return new ChunkedStream(null, memoryChunkSize);
+            return new ChunkedStream(null, memoryChunkSize, asOutputStreamOnDispose);
         }
 
         /// <summary>
@@ -55,12 +56,13 @@ namespace ChunkedStream
         /// then ArgumentNullException exception will be thrown.
         /// </summary>
         /// <param name="pool">Optional MemoryPool instances.</param>
-        public static ChunkedStream FromPool(MemoryPool pool = null)
+        /// <param name="asOutputStreamOnDispose">When set - stream will be moved to ReadForward state on first Dispose call</param>
+        public static ChunkedStream FromPool(MemoryPool pool = null, bool asOutputStreamOnDispose = false)
         {
             if (pool == null && _defaultPool == null)
                 throw new ArgumentNullException("pool", "pool must be specified in case when no default pool is configured");
 
-            return new ChunkedStream(pool ?? _defaultPool, -1);
+            return new ChunkedStream(pool ?? _defaultPool, -1, asOutputStreamOnDispose);
         }
 
         // MemoryPool instance. If it's null - managed heap is used
@@ -72,9 +74,10 @@ namespace ChunkedStream
         private long _position = 0;
         private long _length = 0;
 
+        private bool _asOutputStreamOnDispose;
         private ChunkedStreamState _state = ChunkedStreamState.ReadWrite;
 
-        private ChunkedStream(MemoryPool pool, int memoryChunkSize)
+        private ChunkedStream(MemoryPool pool, int memoryChunkSize, bool asOutputStreamOnDispose)
         {
             if (pool != null)
             {
@@ -87,6 +90,7 @@ namespace ChunkedStream
                 // managed heap only                
                 _chunkSize = memoryChunkSize;
             }
+            _asOutputStreamOnDispose = asOutputStreamOnDispose;
         }
 
         /// <summary>
@@ -96,9 +100,18 @@ namespace ChunkedStream
         /// then all chunks will be allocated on the managed heap.
         /// </summary>
         /// <param name="pool">Optional MemoryPool instances.</param>
-        public ChunkedStream(MemoryPool pool = null)
-            : this(pool ?? _defaultPool, DefaultMemoryChunkSize)
+        /// <param name="asOutputStreamOnDispose">When set - stream will be moved to ReadForward state on first Dispose call</param>
+        public ChunkedStream(MemoryPool pool = null, bool asOutputStreamOnDispose = false)
+            : this(pool ?? _defaultPool, DefaultMemoryChunkSize, asOutputStreamOnDispose)
         {
+        }
+
+        public ChunkedStreamState State
+        {
+            get
+            {
+                return _state;
+            }
         }
 
         public override bool CanRead
@@ -253,13 +266,14 @@ namespace ChunkedStream
                     Buffer.MemoryCopy(pchunk, pbuff, toRead, toRead);
                 }
 
-                if (_state == ChunkedStreamState.ReadForward && (toRead + offset) == _chunkSize)
+                _position += toRead;
+
+                if (_state == ChunkedStreamState.ReadForward && (toRead + offset) == _chunkSize || _position == _length)
                 {
                     // means chunk is completed now and can be released
                     chunk.Dispose();
                 }
 
-                _position += toRead;
                 pbuff += toRead;
                 totalRead += toRead;
                 count -= toRead;
@@ -440,16 +454,6 @@ namespace ChunkedStream
         // gets stream bytes
         public byte[] ToArray()
         {
-            #region Validate
-
-            if (_state == ChunkedStreamState.Closed)
-                throw new ObjectDisposedException(null);
-
-            if (_state == ChunkedStreamState.ReadForward)
-                throw new InvalidOperationException();
-
-            #endregion
-
             return ToArray(0, (int)Length);
         }
 
@@ -461,7 +465,7 @@ namespace ChunkedStream
             if (_state == ChunkedStreamState.Closed)
                 throw new ObjectDisposedException(null);
 
-            if (_state == ChunkedStreamState.ReadForward)
+            if (_state == ChunkedStreamState.ReadForward && offset < _position)
                 throw new InvalidOperationException();
 
             if (offset < 0)
@@ -485,7 +489,10 @@ namespace ChunkedStream
                 }
             }
 
-            _position = tmp;
+            // move back is not allowed
+            if (_state != ChunkedStreamState.ReadForward)
+                _position = tmp;
+
             return buffer;
         }
 
@@ -539,6 +546,14 @@ namespace ChunkedStream
 
         protected override void Dispose(bool disposing)
         {
+            if (_asOutputStreamOnDispose && _state == ChunkedStreamState.ReadWrite)
+            {
+                // do not release chunks, but move to the start and switch to ReadForward state
+                // chunks wll be released while reading, stream modifications will be not allowed
+                AsOutputStream();
+                return;
+            }
+
             base.Dispose(disposing);
 
             if (_state != ChunkedStreamState.Closed && disposing)
