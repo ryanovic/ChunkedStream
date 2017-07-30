@@ -542,9 +542,7 @@ namespace ChunkedStream.Tests
             {
                 byte[] buffer = new byte[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 };
                 stream.Write(buffer, 0, buffer.Length);
-
-                Array.Clear(buffer, 0, buffer.Length);
-                stream.ToArray().SequenceEqual(buffer);
+                Assert.IsTrue(stream.ToArray().SequenceEqual(buffer));
             }
         }
 
@@ -562,9 +560,8 @@ namespace ChunkedStream.Tests
                     .Concat(stream.ToArray(0, 4))
                     .Concat(stream.ToArray(4, 4))
                     .Concat(stream.ToArray(8, 5));
-
-                Array.Clear(buffer, 0, buffer.Length);
-                array.SequenceEqual(buffer);
+                
+                Assert.IsTrue(array.SequenceEqual(buffer));
             }
         }
 
