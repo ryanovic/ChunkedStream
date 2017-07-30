@@ -1,7 +1,6 @@
 ﻿using System;
 using System.IO;
 using System.Collections.Generic;
-using System.Linq;
 
 using ChunkedStream.Chunks;
 
@@ -263,7 +262,11 @@ namespace ChunkedStream
 
                 fixed (byte* pchunk = &chunk.Buffer[chunk.Offset + offset])
                 {
+#if NET20
+                    MemoryCopy(pchunk, pbuff, toRead);
+#else
                     Buffer.MemoryCopy(pchunk, pbuff, toRead, toRead);
+#endif
                 }
 
                 _position += toRead;
@@ -378,8 +381,11 @@ namespace ChunkedStream
                 fixed (byte* pchunk = &chunk.Buffer[chunk.Offset + offset])
                 {
                     int toWrite = Math.Min(count, _chunkSize - offset);
+#if NET20
+                    MemoryCopy(pbuff, pchunk, toWrite);
+#else
                     Buffer.MemoryCopy(pbuff, pchunk, toWrite, toWrite);
-
+#endif
                     _position = checked(_position + toWrite);
                     pbuff += toWrite;
                     count -= toWrite;
@@ -446,7 +452,7 @@ namespace ChunkedStream
             if (_state == ChunkedStreamState.ReadForward)
                 throw new InvalidOperationException();
 
-            #endregion            
+            #endregion
 
             int offset;
             var chunk = GetChunkWithOffset(out offset);
@@ -649,5 +655,54 @@ namespace ChunkedStream
         }
 
         #endregion
+
+#if NET20
+
+        // custom MemoryCopy for .Net 2.0 Framework support
+
+        private static void MemoryCopy(byte* psource, byte* ptarget, int count)
+        {
+            int n = count >> 3;
+            
+            // first copy by 8 bytes in loop
+            while (n-- > 0)
+            {
+                *(long*)(ptarget) = *(long*)(psource);
+                ptarget += 8;
+                psource += 8;
+            }
+
+            // and then copy last 1 - 7 bytes
+            switch (count & 0x00000007)
+            {
+                case 1:
+                    *(ptarget) = *(psource);
+                    break;
+                case 2:
+                    *(short*)(ptarget) = *(short*)(psource);
+                    break;
+                case 3:
+                    *(ptarget) = *(psource);
+                    *(short*)(ptarget + 1) = *(short*)(psource + 1);
+                    break;
+                case 4:
+                    *(int*)(ptarget) = *(int*)(psource);
+                    break;
+                case 5:
+                    *(ptarget) = *(psource);
+                    *(int*)(ptarget + 1) = *(int*)(psource + 1);
+                    break;
+                case 6:
+                    *(short*)(ptarget) = *(short*)(psource);
+                    *(int*)(ptarget + 2) = *(int*)(psource + 2);
+                    break;
+                case 7:
+                    *(ptarget) = *(psource);
+                    *(short*)(ptarget + 1) = *(short*)(psource + 1);
+                    *(int*)(ptarget + 3) = *(int*)(psource + 3);
+                    break;
+            }
+        }
+#endif
     }
 }
