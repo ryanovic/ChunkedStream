@@ -261,6 +261,7 @@ namespace ChunkedStream.Tests
                     Assert.AreEqual("line1", reader.ReadLine());
                     Assert.AreEqual("line2", reader.ReadLine());
                     Assert.AreEqual("line3", reader.ReadLine());
+                    Assert.IsNull(reader.ReadLine());
                 }
 
                 Assert.AreEqual(ChunkedStreamState.Closed, stream.State);
@@ -293,6 +294,7 @@ namespace ChunkedStream.Tests
                     Assert.AreEqual("line1", reader.ReadLine());
                     Assert.AreEqual("line2", reader.ReadLine());
                     Assert.AreEqual("line3", reader.ReadLine());
+                    Assert.IsNull(reader.ReadLine());
                 }
             }
         }
