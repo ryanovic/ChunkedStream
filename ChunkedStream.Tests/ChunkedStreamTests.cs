@@ -1,594 +1,310 @@
 ﻿using System;
-using System.IO;
 using System.Collections.Generic;
-using System.Linq;
+using System.IO;
 using System.Text;
 using System.Threading.Tasks;
-using Microsoft.VisualStudio.TestTools.UnitTesting;
-
-using ChunkedStream;
-using ChunkedStream.Chunks;
+using Xunit;
 
 namespace ChunkedStream.Tests
 {
-    [TestClass]
     public class ChunkedStreamTests
     {
-        [TestMethod]
-        public void ChunkedStream_FromPool_Throws_WhenNoPool()
+        [Fact]
+        public void Writes_And_Reads_Bytes()
         {
-            try
+            var source = new byte[] { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+            var pool = new TestPool(chunkSize: 1);
+
+            using (var stream = new ChunkedStream(pool))
             {
-                var stream = ChunkedStream.FromPool();
-                Assert.Fail("ArgumentNullException is expected");
-            }
-            catch (ArgumentNullException)
-            {
-            }
-        }
+                stream.Write(source);
 
-        [TestMethod]
-        public void ChunkedStream_ReadWriteByte()
-        {
-            var pool = new MemoryPool(chunkSize: 4, chunkCount: 2);
-            var stream = ChunkedStream.FromPool(pool);
-
-            for (int i = 0; i < 16; i++)
-            {
-                stream.WriteByte((byte)i);
-            }
-
-            Assert.AreEqual(2, pool.TotalAllocated);
-            Assert.AreEqual(16, stream.Position);
-
-            stream.Position = 0;
-
-            for (int i = 0; i < 16; i++)
-            {
-                Assert.AreEqual(i, stream.ReadByte());
-            }
-
-            stream.Dispose();
-            Assert.AreEqual(0, pool.TotalAllocated);
-        }
-
-        [TestMethod]
-        public void ChunkedStream_ReadWriteByte_FromMemory()
-        {
-            using (var stream = ChunkedStream.FromMemory(memoryChunkSize: 4))
-            {
-                for (int i = 0; i < 16; i++)
-                {
-                    stream.WriteByte((byte)i);
-                }
-
-                Assert.AreEqual(16, stream.Position);
+                var buffer = new byte[stream.Length];
 
                 stream.Position = 0;
+                stream.Read(buffer);
 
-                for (int i = 0; i < 16; i++)
-                {
-                    Assert.AreEqual(i, stream.ReadByte());
-                }
-            }
-        }
-
-        [TestMethod]
-        public void ChunkedStream_ReadWrite()
-        {
-            byte[] buffer = Enumerable.Range(0, 16).Select(i => (byte)i).ToArray();
-
-            var pool = new MemoryPool(chunkSize: 4, chunkCount: 2);
-            var stream = ChunkedStream.FromPool(pool);
-
-            stream.Write(buffer, 0, buffer.Length);
-
-            Assert.AreEqual(16, stream.Length);
-            Assert.AreEqual(2, pool.TotalAllocated);
-
-            stream.Position = 0;
-            stream.Read(buffer, 0, buffer.Length);
-
-            Assert.AreEqual(16, stream.Position);
-            for (int i = 0; i < buffer.Length; i++)
-            {
-                Assert.AreEqual(i, buffer[i]);
+                Assert.Equal(stream.Length, stream.Position);
+                Assert.Equal(10, pool.Allocated);
+                Assert.Equal(source, buffer);
             }
 
-            stream.Dispose();
-            Assert.AreEqual(0, pool.TotalAllocated);
+            Assert.Equal(0, pool.Allocated);
         }
 
-        [TestMethod]
-        public void ChunkedStream_ReadWrite_FromMemory()
+        [Fact]
+        public void Writes_And_Reads_Bytes_In_Parts()
         {
-            byte[] buffer = Enumerable.Range(0, 16).Select(i => (byte)i).ToArray();
+            var source = new byte[] { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+            var pool = new TestPool(chunkSize: 3);
 
-            using (var stream = ChunkedStream.FromMemory(memoryChunkSize: 4))
+            using (var stream = new ChunkedStream(pool))
             {
-                stream.Write(buffer, 0, buffer.Length);
+                stream.Write(source, 0, 2);
+                stream.Write(source, 2, 2);
+                stream.Write(source, 4, 2);
+                stream.Write(source, 6, 2);
+                stream.Write(source, 8, 2);
 
-                Assert.AreEqual(16, stream.Length);
+                var buffer = new byte[stream.Length];
 
                 stream.Position = 0;
-                stream.Read(buffer, 0, buffer.Length);
+                stream.Read(buffer, 0, 2);
+                stream.Read(buffer, 2, 2);
+                stream.Read(buffer, 4, 2);
+                stream.Read(buffer, 6, 2);
+                stream.Read(buffer, 8, 2);
 
-                Assert.AreEqual(16, stream.Position);
-                for (int i = 0; i < buffer.Length; i++)
-                {
-                    Assert.AreEqual(i, buffer[i]);
-                }
+                Assert.Equal(stream.Length, stream.Position);
+                Assert.Equal(4, pool.Allocated);
+                Assert.Equal(source, buffer);
             }
+
+            Assert.Equal(0, pool.Allocated);
         }
 
-        [TestMethod]
-        public void ChunkedStream_ReadWrite_WhenManyCalls()
+        [Fact]
+        public void Writes_And_Reads_Bytes_One_By_One()
         {
-            foreach (int count in Enumerable.Range(1, 32))
+            var source = new byte[] { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+            var pool = new TestPool(chunkSize: 2);
+
+            using (var stream = new ChunkedStream(pool))
             {
-                byte[] buffer = Enumerable.Range(0, 1024).Select(i => (byte)i).ToArray();
-
-                var pool = new MemoryPool(chunkSize: 16, chunkCount: 32);
-                var stream = ChunkedStream.FromPool(pool);
-
-                for (int i = 0; i < buffer.Length; i += count)
+                for (int i = 0; i < source.Length; i++)
                 {
-                    stream.Write(buffer, i, Math.Min(count, buffer.Length - i));
+                    stream.WriteByte(source[i]);
                 }
 
-                Assert.AreEqual(1024, stream.Length);
-                Assert.AreEqual(32, pool.TotalAllocated);
+                var buffer = new byte[stream.Length];
 
                 stream.Position = 0;
-                Array.Clear(buffer, 0, buffer.Length);
-
-                for (int i = 0; i < buffer.Length; i += count)
-                {
-                    stream.Read(buffer, i, Math.Min(count, buffer.Length - i));
-                }
-
-                Assert.AreEqual(1024, stream.Position);
-
 
                 for (int i = 0; i < buffer.Length; i++)
                 {
-                    Assert.AreEqual((byte)i, buffer[i], $"Failed on {count} buffer length");
+                    buffer[i] = (byte)stream.ReadByte();
                 }
 
-                stream.Dispose();
-                Assert.AreEqual(0, pool.TotalAllocated);
+                Assert.Equal(-1, stream.ReadByte());
+                Assert.Equal(stream.Length, stream.Position);
+                Assert.Equal(5, pool.Allocated);
+                Assert.Equal(source, buffer);
+            }
+
+            Assert.Equal(0, pool.Allocated);
+        }
+
+        [Fact]
+        public void SetLength_Creates_Empty_Stream()
+        {
+            var pool = new TestPool(chunkSize: 1);
+
+            using (var stream = new ChunkedStream(pool))
+            {
+                stream.SetLength(5);
+
+                Assert.Equal(new byte[5], stream.ToArray());
+                Assert.Equal(0, stream.Position);
+                Assert.Equal(5, stream.Length);
+                Assert.Equal(0, pool.Allocated);
             }
         }
 
-        [TestMethod]
-        public void ChunkedStream_ReadWrite_WhenGlobalPool_InParallel()
+        [Theory]
+        [InlineData(4, new byte[] { 0, 1, 2, 3 })]
+        [InlineData(0, new byte[] { })]
+        [InlineData(6, new byte[] { 0, 1, 2, 3, 4, 0 })]
+        [InlineData(10, new byte[] { 0, 1, 2, 3, 4, 0, 0, 0, 0, 0 })]
+        public void SetLength_Updates_Stream(int newLength, byte[] expected)
         {
-            try
+            var pool = new TestPool(chunkSize: 3);
+            var buffer = new byte[] { 0, 1, 2, 3, 4 };
+
+            using (var stream = new ChunkedStream(pool))
             {
-                int threadCount = 8;
-                ChunkedStream.InitializePool(64, 32);
+                stream.Write(buffer);
+                stream.SetLength(newLength);
 
-                var actions = Enumerable.Range(0, threadCount).Select(_ => new Action(() =>
-                {
-                    foreach (int count in Enumerable.Range(1, 32))
-                    {
-                        byte[] buffer = Enumerable.Range(0, 1024).Select(i => (byte)i).ToArray();
-                        using (var stream = new ChunkedStream())
-                        {
-                            for (int i = 0; i < buffer.Length; i += count)
-                            {
-                                stream.Write(buffer, i, Math.Min(count, buffer.Length - i));
-                            }
-
-                            Assert.AreEqual(1024, stream.Length);
-
-                            stream.Position = 0;
-                            Array.Clear(buffer, 0, buffer.Length);
-
-                            for (int i = 0; i < buffer.Length; i += count)
-                            {
-                                stream.Read(buffer, i, Math.Min(count, buffer.Length - i));
-                            }
-
-                            Assert.AreEqual(1024, stream.Position);
-
-
-                            for (int i = 0; i < buffer.Length; i++)
-                            {
-                                Assert.AreEqual((byte)i, buffer[i], $"Failed on {count} buffer length");
-                            }
-                        }
-                    }
-                })).ToArray();
-
-                Parallel.Invoke(actions);
+                Assert.Equal(expected, stream.ToArray());
             }
-            finally
-            {
-                ChunkedStream.SetMemoryPool(null);
-            }
+
+            Assert.Equal(0, pool.Allocated);
         }
 
-        [TestMethod]
-        public void ChunkedStream_ReadByte_ByPosition()
+        [Theory]
+        [InlineData(0, SeekOrigin.Begin, new byte[] { 99, 1, 2 })]
+        [InlineData(1, SeekOrigin.Current, new byte[] { 0, 1, 2, 0, 99 })]
+        [InlineData(-1, SeekOrigin.End, new byte[] { 0, 1, 99 })]
+        public void Writes_Byte_At_Position(int offset, SeekOrigin origin, byte[] expected)
         {
-            byte[] buffer = Enumerable.Range(0, 16).Select(i => (byte)i).ToArray();
-            var pool = new MemoryPool(chunkSize: 4, chunkCount: 2);
+            var pool = new TestPool(chunkSize: 1);
+            var buffer = new byte[] { 0, 1, 2 };
 
-            using (var stream = ChunkedStream.FromPool(pool))
+            using (var stream = new ChunkedStream(pool))
             {
-                stream.Write(buffer, 0, 16);
+                stream.Write(buffer);
+                stream.Seek(offset, origin);
+                stream.WriteByte(99);
 
-                var cases = new[] {
-                    new { Position = 0, Expected = 0 },
-                    new { Position = 4, Expected = 4 },
-                    new { Position = 15, Expected = 15 },
-                    new { Position = 16, Expected = -1 },
-                    new { Position = 32, Expected = -1 },
-                    new { Position = 1024, Expected = -1 }
-                };
-
-                foreach (var @case in cases)
-                {
-                    stream.Position = @case.Position;
-                    Assert.AreEqual(@case.Position, stream.Position);
-                    Assert.AreEqual(@case.Expected, stream.ReadByte());
-                }
-
+                Assert.Equal(expected, stream.ToArray());
             }
-            Assert.AreEqual(0, pool.TotalAllocated);
+
+            Assert.Equal(0, pool.Allocated);
         }
 
-        [TestMethod]
-        public void ChunkedStream_WriteByte_ByPosition()
+        [Theory]
+        [InlineData(0, new byte[] { 99, 99, 0, 0 })]
+        [InlineData(3, new byte[] { 0, 0, 0, 99, 99 })]
+        [InlineData(6, new byte[] { 0, 0, 0, 0, 0, 0, 99, 99 })]
+        public void Writes_Byte_At_Position_Of_Empty_Stream(int position, byte[] expected)
         {
-            var pool = new MemoryPool(chunkSize: 4, chunkCount: 2);
+            var pool = new TestPool(chunkSize: 2);
+            var buffer = new byte[] { 99, 99 };
 
-            using (var stream = ChunkedStream.FromPool(pool))
+            using (var stream = new ChunkedStream(pool))
             {
-                var cases = new[] {
-                    new { Position = 0, Expected = 2 },
-                    new { Position = 4, Expected = 4 },
-                    new { Position = 15, Expected = 8 },
-                    new { Position = 16, Expected = 16 },
-                    new { Position = 32, Expected = 32 },
-                    new { Position = 1024, Expected = 64 }
-                };
-
-                foreach (var @case in cases)
-                {
-                    stream.Position = @case.Position;
-                    stream.WriteByte((byte)@case.Expected);
-
-                    Assert.AreEqual(@case.Position + 1, stream.Length);
-                    Assert.AreEqual(@case.Position + 1, stream.Position);
-
-                    stream.Position = @case.Position;
-                    Assert.AreEqual(@case.Expected, stream.ReadByte());
-                }
-
-            }
-            Assert.AreEqual(0, pool.TotalAllocated);
-        }
-
-        [TestMethod]
-        public void ChunkedStream_Seek()
-        {
-            var pool = new MemoryPool(chunkSize: 4, chunkCount: 2);
-
-            using (var stream = ChunkedStream.FromPool(pool))
-            {
-                stream.SetLength(16);
-
-                Assert.AreEqual(16, stream.Length);
-                Assert.AreEqual(0, stream.Position);
-
-                var cases = new[] {
-                    new { Expected = 0, Position = 0, Origin = SeekOrigin.Begin },
-                    new { Expected = 5, Position = 5, Origin = SeekOrigin.Begin },
-                    new { Expected = 0, Position = -5, Origin = SeekOrigin.Current },
-                    new { Expected = 15, Position = 15, Origin = SeekOrigin.Current },
-                    new { Expected = 0, Position = -16, Origin = SeekOrigin.End },
-                    new { Expected = 6, Position = -10, Origin = SeekOrigin.End },
-                    new { Expected = 1016, Position = 1000, Origin = SeekOrigin.End }
-                };
-
-                foreach (var @case in @cases)
-                {
-                    stream.Seek(@case.Position, @case.Origin);
-
-                    Assert.AreEqual(16, stream.Length);
-                    Assert.AreEqual(@case.Expected, stream.Position);
-                }
-
-            }
-        }
-
-        [TestMethod]
-        public void ChunkedStream_Position()
-        {
-            var pool = new MemoryPool(chunkSize: 4, chunkCount: 2);
-
-            using (var stream = ChunkedStream.FromPool(pool))
-            {
-                stream.SetLength(16);
-
-                Assert.AreEqual(16, stream.Length);
-                Assert.AreEqual(0, stream.Position);
-
-                var cases = new[] {
-                    new { Position = 0 },
-                    new { Position = 5 },
-                    new { Position = 0 },
-                    new { Position = 15 },
-                    new { Position = 0},
-                    new { Position = 6},
-                    new { Position = 1016}
-                };
-
-                foreach (var @case in @cases)
-                {
-                    stream.Position = @case.Position;
-
-                    Assert.AreEqual(16, stream.Length);
-                    Assert.AreEqual(@case.Position, stream.Position);
-                }
-
-            }
-        }
-
-        [TestMethod]
-        public void ChunkedStream_SetLength()
-        {
-            var pool = new MemoryPool(chunkSize: 4, chunkCount: 2);
-
-            using (var stream = ChunkedStream.FromPool(pool))
-            {
-                Assert.AreEqual(0, stream.Length);
-                Assert.AreEqual(0, stream.Position);
-
-                stream.SetLength(16);
-
-                Assert.AreEqual(0, pool.TotalAllocated);
-                Assert.AreEqual(16, stream.Length);
-                Assert.AreEqual(0, stream.Position);
-
-                stream.Position = 32;
-                stream.SetLength(64);
-
-                Assert.AreEqual(0, pool.TotalAllocated);
-                Assert.AreEqual(64, stream.Length);
-                Assert.AreEqual(32, stream.Position);
-
-                stream.SetLength(16);
-
-                Assert.AreEqual(0, pool.TotalAllocated);
-                Assert.AreEqual(16, stream.Length);
-                Assert.AreEqual(16, stream.Position);
-            }
-        }
-
-        [TestMethod]
-        public void ChunkedStream_SetLength_WhenLessThanPosition()
-        {
-            var pool = new MemoryPool(chunkSize: 4, chunkCount: 2);
-
-            using (var stream = ChunkedStream.FromPool(pool))
-            {
-                stream.Position = 4;
-                stream.WriteByte(1);
-
-                Assert.AreEqual(1, pool.TotalAllocated);
-                Assert.AreEqual(5, stream.Length);
-
                 stream.SetLength(4);
-                Assert.AreEqual(0, pool.TotalAllocated);
-                Assert.AreEqual(4, stream.Length);
+                stream.Position = position;
+                stream.Write(buffer);
+
+                Assert.Equal(expected, stream.ToArray());
             }
+
+            Assert.Equal(0, pool.Allocated);
         }
 
-        [TestMethod]
-        public void ChunkedStream_Read()
+        [Theory]
+        [InlineData(0, 6, new byte[] { 0, 1, 2, 3, 4, 5 })]
+        [InlineData(1, 5, new byte[] { 1, 2, 3, 4 })]
+        public void Iterates_Chunks(int from, int to, byte[] expected)
         {
-            var pool = new MemoryPool(chunkSize: 4, chunkCount: 2);
+            var pool = new TestPool(chunkSize: 2);
+            var source = new byte[] { 0, 1, 2, 3, 4, 5 };
+            var buffer = new byte[expected.Length];
+            var offset = 0;
 
-            using (var stream = ChunkedStream.FromPool(pool))
+            using (var stream = new ChunkedStream(pool))
             {
-                byte[] buffer = new byte[4] { 255, 255, 255, 255 };
+                stream.Write(source);
 
-                stream.SetLength(8);
-                Assert.AreEqual(4, stream.Read(buffer, 0, buffer.Length));
-
-                stream.Position += 2;
-                Assert.AreEqual(2, stream.Read(buffer, 0, buffer.Length));
-
-                Assert.AreEqual(0, stream.Read(buffer, 0, buffer.Length));
-
-                stream.Position = 1000;
-                Assert.AreEqual(0, stream.Read(buffer, 0, buffer.Length));
-            }
-        }
-
-        [TestMethod]
-        public void ChunkedStream_Write()
-        {
-            var pool = new MemoryPool(chunkSize: 4, chunkCount: 2);
-
-            using (var stream = ChunkedStream.FromPool(pool))
-            {
-                byte[] buffer = new byte[4] { 255, 255, 255, 255 };
-
-                stream.Position = 4;
-                stream.Write(buffer, 0, buffer.Length);
-                Assert.AreEqual(8, stream.Length);
-
-                stream.Position = 16;
-                stream.Write(buffer, 0, buffer.Length);
-                Assert.AreEqual(20, stream.Length);
-
-                stream.Position = 0;
-                Assert.AreEqual(0, stream.ReadByte());
-
-                stream.Position = 3;
-                Assert.AreEqual(0, stream.ReadByte());
-
-                stream.Position = 4;
-                Assert.AreEqual(255, stream.ReadByte());
-
-                stream.Position = 15;
-                Assert.AreEqual(0, stream.ReadByte());
-
-                stream.Position = 16;
-                Assert.AreEqual(255, stream.ReadByte());
-
-                stream.Position = 1000;
-                Assert.AreEqual(-1, stream.ReadByte());
-            }
-        }
-
-        [TestMethod]
-        public void ChunkedStream_AsOutputStream()
-        {
-            var pool = new MemoryPool(chunkSize: 4, chunkCount: 4);
-
-            using (var stream = ChunkedStream.FromPool(pool))
-            {
-                byte[] buffer = new byte[4] { 255, 255, 255, 255 };
-
-                for (int i = 0; i < 8; i++)
+                stream.ForEach(from, to, chunk =>
                 {
-                    stream.Position = i * 4;
+                    Buffer.BlockCopy(chunk.Array, chunk.Offset, buffer, offset, chunk.Count);
+                    offset += chunk.Count;
+                });
 
-                    if (i % 2 == 0)
-                    {
-                        stream.Write(buffer, 0, buffer.Length);
-                    }
-                }
-                Assert.AreEqual(4, pool.TotalAllocated);
-
-                // skip 1 full chunk
-                stream.AsOutputStream(fromPosition: 4);
-                Assert.AreEqual(3, pool.TotalAllocated);
-
-                // read 2 null chunk by byte
-                for (int i = 0; i < 4; i++)
-                {
-                    Assert.AreEqual(0, stream.ReadByte());
-                }
-                Assert.AreEqual(3, pool.TotalAllocated);
-
-                // read 3 full chunk by byte
-                for (int i = 0; i < 4; i++)
-                {
-                    Assert.AreEqual(255, stream.ReadByte());
-                }
-                Assert.AreEqual(2, pool.TotalAllocated);
-
-                // skip 4, 5 chunks by seek
-                stream.Seek(8, SeekOrigin.Current);
-                Assert.AreEqual(1, pool.TotalAllocated);
-
-                // read 6 null chunk
-                Array.Clear(buffer, 0, buffer.Length);
-                stream.Read(buffer, 0, buffer.Length);
-
-                Assert.AreEqual(0, buffer.Select(x => (int)x).Sum());
-                Assert.AreEqual(1, pool.TotalAllocated);
-
-                // read 7 full chunk
-                Array.Clear(buffer, 0, buffer.Length);
-                stream.Read(buffer, 0, buffer.Length);
-
-                Assert.AreEqual(1020, buffer.Select(x => (int)x).Sum());
-                Assert.AreEqual(0, pool.TotalAllocated);
-
-                // complete stream
-                Assert.AreEqual(-1, stream.ReadByte());
-                Assert.AreEqual(0, stream.Read(buffer, 0, buffer.Length));
-
-                Assert.AreEqual(28, stream.Length);
-                Assert.AreEqual(28, stream.Position);
+                Assert.Equal(expected, buffer);
             }
+
+            Assert.Equal(0, pool.Allocated);
         }
 
-        [TestMethod]
-        public void ChunkedStream_AsOutputStream_WhenDefault()
+        [Theory]
+        [InlineData(0, 6, new byte[] { 0, 1, 2, 3, 4, 5 })]
+        [InlineData(1, 5, new byte[] { 1, 2, 3, 4 })]
+        public async Task Iterates_Chunks_Async(int from, int to, byte[] expected)
         {
-            var pool = new MemoryPool(chunkSize: 4, chunkCount: 4);
+            var pool = new TestPool(chunkSize: 2);
+            var source = new byte[] { 0, 1, 2, 3, 4, 5 };
+            var buffer = new byte[expected.Length];
+            var offset = 0;
 
-            using (var stream = ChunkedStream.FromPool(pool))
+            using (var stream = new ChunkedStream(pool))
             {
-                byte[] buffer = new byte[4] { 255, 255, 255, 255 };
-                stream.Write(buffer, 0, buffer.Length);
+                stream.Write(source);
 
-                stream.AsOutputStream();
-                Assert.AreEqual(1, pool.TotalAllocated);
-                Assert.AreEqual(0, stream.Position);
-
-                Array.Clear(buffer, 0, buffer.Length);
-
-                Assert.AreEqual(4, stream.Read(buffer, 0, buffer.Length));
-                Assert.AreEqual(1020, buffer.Select(x => (int)x).Sum());
-                Assert.AreEqual(0, pool.TotalAllocated);
-            }
-        }
-
-        [TestMethod]
-        public void ChunkedStream_ToaArray()
-        {
-            var pool = new MemoryPool(chunkSize: 4, chunkCount: 4);
-
-            using (var stream = ChunkedStream.FromPool(pool))
-            {
-                byte[] buffer = new byte[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 };
-                stream.Write(buffer, 0, buffer.Length);
-                Assert.IsTrue(stream.ToArray().SequenceEqual(buffer));
-            }
-        }
-
-        [TestMethod]
-        public void ChunkedStream_ToaArray_WhenManyCalls()
-        {
-            var pool = new MemoryPool(chunkSize: 4, chunkCount: 4);
-
-            using (var stream = ChunkedStream.FromPool(pool))
-            {
-                byte[] buffer = new byte[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 };
-                stream.Write(buffer, 0, buffer.Length);
-
-                var array = stream.ToArray(0, 0)
-                    .Concat(stream.ToArray(0, 4))
-                    .Concat(stream.ToArray(4, 4))
-                    .Concat(stream.ToArray(8, 5));
-                
-                Assert.IsTrue(array.SequenceEqual(buffer));
-            }
-        }
-
-        [TestMethod]
-        public void ChunkedStream_AsOutputStreamOnDispose()
-        {
-            var pool = new MemoryPool(chunkSize: 4, chunkCount: 4);
-
-            using (var stream = new ChunkedStream(pool, asOutputStreamOnDispose: true))
-            {
-                using (var writer = new StreamWriter(stream))
+                await stream.ForEachAsync(from, to, async chunk =>
                 {
-                    writer.Write("hello world");
-                }
+                    await Task.Delay(0);
+                    Buffer.BlockCopy(chunk.Array, chunk.Offset, buffer, offset, chunk.Count);
+                    offset += chunk.Count;
+                });
 
-                Assert.AreEqual(0, stream.Position);
-                Assert.AreEqual(ChunkedStreamState.ReadForward, stream.State);
-                Assert.AreEqual(3, pool.TotalAllocated);
-
-                using (var reader = new StreamReader(stream))
-                {
-                    Assert.AreEqual("hello world", reader.ReadToEnd());
-                    Assert.AreEqual(0, pool.TotalAllocated);
-                }
-
-                Assert.AreEqual(ChunkedStreamState.Closed, stream.State);
+                Assert.Equal(expected, buffer);
             }
+
+            Assert.Equal(0, pool.Allocated);
+        }
+
+        [Theory]
+        [InlineData(0)]
+        [InlineData(3)]
+        [InlineData(6)]
+        public void Moves_Chunks(int from)
+        {
+            var pool = new TestPool(chunkSize: 2);
+            var source = new byte[] { 0, 1, 2, 3, 4, 5 };
+            var expected = new byte[source.Length - from];
+            var memStream = new MemoryStream();
+            Buffer.BlockCopy(source, from, expected, 0, expected.Length);
+
+            using (var stream = new ChunkedStream(pool))
+            {
+                stream.Write(source);
+                stream.Position = from;
+                stream.MoveTo(memStream);
+
+                Assert.Equal(expected, memStream.ToArray());
+            }
+
+            Assert.Equal(0, pool.Allocated);
+        }
+
+        [Theory]
+        [InlineData(0)]
+        [InlineData(3)]
+        [InlineData(6)]
+        public async Task Moves_Chunks_Async(int from)
+        {
+            var pool = new TestPool(chunkSize: 2);
+            var source = new byte[] { 0, 1, 2, 3, 4, 5 };
+            var expected = new byte[source.Length - from];
+            var memStream = new MemoryStream();
+            Buffer.BlockCopy(source, from, expected, 0, expected.Length);
+
+            using (var stream = new ChunkedStream(pool))
+            {
+                stream.Write(source);
+                stream.Position = from;
+                await stream.MoveToAsync(memStream);
+
+                Assert.Equal(expected, memStream.ToArray());
+            }
+
+            Assert.Equal(0, pool.Allocated);
+        }
+
+        [Fact]
+        public void BufferWriter_Writes_In_Stream()
+        {
+            var sourceBuffer = new byte[] { 0, 1, 2, 3, 4, 5, 6, 7 };
+            var source = sourceBuffer.AsSpan();
+            var pool = new TestPool(chunkSize: 3);
+
+            using (var stream = new ChunkedStream(pool))
+            {
+                var writer = stream.GetWriter();
+
+                var span = writer.GetSpan(2);
+                source.Slice(0, 2).CopyTo(span);
+                writer.Advance(2);
+
+                span = writer.GetSpan(2);
+                source.Slice(2, 2).CopyTo(span);
+                writer.Advance(2);
+
+                span = writer.GetSpan(2);
+                source.Slice(4, 2).CopyTo(span);
+                writer.Advance(2);
+
+                span = writer.GetSpan(0);
+                source.Slice(6, 2).CopyTo(span);
+                writer.Advance(2);
+
+                Assert.Equal(sourceBuffer, stream.ToArray());
+            }
+
+            Assert.Equal(0, pool.Allocated);
         }
     }
 }

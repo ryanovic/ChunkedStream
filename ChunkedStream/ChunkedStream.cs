@@ -1,203 +1,72 @@
-﻿using System;
-using System.IO;
-using System.Collections.Generic;
-
-using ChunkedStream.Chunks;
-
-namespace ChunkedStream
+﻿namespace ChunkedStream
 {
-    public unsafe sealed class ChunkedStream : Stream
+    using System;
+    using System.Collections.Generic;
+    using System.Linq;
+    using System.IO;
+    using System.Buffers;
+    using System.Threading.Tasks;
+    using System.Threading;
+    using System.Diagnostics;
+
+    public sealed class ChunkedStream : Stream
     {
-        private const int DefaultMemoryChunkSize = 512;
-        private const int DefaultChunksCapacity = 4;
+        private const int DefaultChunkArraySize = 4;
 
-        private static MemoryPool _defaultPool = null;
+        private readonly IChunkPool chunkPool;
+        private readonly ArrayPool<Chunk> arrayPool;
 
-        /// <summary>
-        /// Set global default pool.
-        /// </summary>
-        public static void SetMemoryPool(MemoryPool pool)
-        {
-            _defaultPool = pool;
-        }
+        private Chunk[] chunks;
+        private long length;
+        private long position;
 
-        /// <summary>
-        /// Initializes new global pool will be shared by all ChunkedStream instances by default.
-        /// </summary>
-        /// <param name="chunkSize">Chunk Size</param>
-        /// <param name="chunkCount">Chunk count in pool.</param>
-        public static void InitializePool(int chunkSize = 4096, int chunkCount = 1000)
-        {
-            if (_defaultPool != null)
-                throw new InvalidOperationException("Pool is already initialized");
-
-            _defaultPool = new MemoryPool(chunkSize, chunkCount);
-        }
-
-        /// <summary>
-        /// Creates a new instance of ChunkedStream which will use chunks from managed heap only.
-        /// </summary>
-        /// <param name="memoryChunkSize">Chunk Size</param>
-        /// <param name="asOutputStreamOnDispose">When set - stream will be moved to ReadForward state on first Dispose call</param>
-        /// <returns></returns>
-        public static ChunkedStream FromMemory(int memoryChunkSize = DefaultMemoryChunkSize, bool asOutputStreamOnDispose = false)
-        {
-            if (memoryChunkSize < MemoryPool.MinChunkSize)
-                throw new ArgumentException($"Chunk Size must be positive and greater than or equal {MemoryPool.MinChunkSize}", "memoryChunkSize");
-
-            return new ChunkedStream(null, memoryChunkSize, asOutputStreamOnDispose);
-        }
-
-        /// <summary>
-        /// Creates a new instance of ChunkedStream.
-        /// If <paramref name="pool"/> is null - default memory pool will be used instead.
-        /// If default memory pool is not initialized and <paramref name="pool"/> is null
-        /// then ArgumentNullException exception will be thrown.
-        /// </summary>
-        /// <param name="pool">Optional MemoryPool instances.</param>
-        /// <param name="asOutputStreamOnDispose">When set - stream will be moved to ReadForward state on first Dispose call</param>
-        public static ChunkedStream FromPool(MemoryPool pool = null, bool asOutputStreamOnDispose = false)
-        {
-            if (pool == null && _defaultPool == null)
-                throw new ArgumentNullException("pool", "pool must be specified in case when no default pool is configured");
-
-            return new ChunkedStream(pool ?? _defaultPool, -1, asOutputStreamOnDispose);
-        }
-
-        // MemoryPool instance. If it's null - managed heap is used
-        private readonly MemoryPool _pool;
-        private readonly int _chunkSize;
-
-        private IChunk[] _chunks = new IChunk[DefaultChunksCapacity];
-
-        private long _position = 0;
-        private long _length = 0;
-
-        private bool _asOutputStreamOnDispose;
-        private ChunkedStreamState _state = ChunkedStreamState.ReadWrite;
-
-        private ChunkedStream(MemoryPool pool, int memoryChunkSize, bool asOutputStreamOnDispose)
-        {
-            if (pool != null)
-            {
-                // work with pool
-                _pool = pool;
-                _chunkSize = pool.ChunkSize;
-            }
-            else
-            {
-                // managed heap only                
-                _chunkSize = memoryChunkSize;
-            }
-            _asOutputStreamOnDispose = asOutputStreamOnDispose;
-        }
-
-        /// <summary>
-        /// Creates a new instance of ChunkedStream.
-        /// If <paramref name="pool"/> is null - default memory pool will be used instead.
-        /// If default memory pool is not initialized and <paramref name="pool"/> is null
-        /// then all chunks will be allocated on the managed heap.
-        /// </summary>
-        /// <param name="pool">Optional MemoryPool instances.</param>
-        /// <param name="asOutputStreamOnDispose">When set - stream will be moved to ReadForward state on first Dispose call</param>
-        public ChunkedStream(MemoryPool pool = null, bool asOutputStreamOnDispose = false)
-            : this(pool ?? _defaultPool, DefaultMemoryChunkSize, asOutputStreamOnDispose)
+        public ChunkedStream(IChunkPool chunkPool)
+            : this(chunkPool, ChunkArrayPool.Empty)
         {
         }
 
-        public ChunkedStreamState State
+        public ChunkedStream(IChunkPool chunkPool, ArrayPool<Chunk> arrayPool)
         {
-            get
-            {
-                return _state;
-            }
+            if (chunkPool == null) throw new ArgumentNullException(nameof(chunkPool));
+            if (arrayPool == null) throw new ArgumentNullException(nameof(arrayPool));
+
+            this.chunkPool = chunkPool;
+            this.arrayPool = arrayPool;
+            this.chunks = arrayPool.Rent(DefaultChunkArraySize);
         }
 
-        public override bool CanRead
-        {
-            get
-            {
-                return _state != ChunkedStreamState.Closed;
-            }
-        }
+        public int ChunkSize => chunkPool.ChunkSize;
 
-        public override bool CanSeek
-        {
-            get
-            {
-                return _state == ChunkedStreamState.ReadWrite;
-            }
-        }
+        public override bool CanRead => true;
 
-        public override bool CanWrite
-        {
-            get
-            {
-                return _state == ChunkedStreamState.ReadWrite;
-            }
-        }
+        public override bool CanSeek => true;
 
-        // gets Length
-        public override long Length
-        {
-            get
-            {
-                #region Validate
+        public override bool CanWrite => true;
 
-                if (_state == ChunkedStreamState.Closed)
-                    throw new ObjectDisposedException(null);
+        public override long Length => length;
 
-                #endregion
-
-                return _length;
-            }
-        }
-
-        // gets or sets Position
         public override long Position
         {
             get
             {
-                #region Validate
-
-                if (_state == ChunkedStreamState.Closed)
-                    throw new ObjectDisposedException(null);
-
-                #endregion
-
-                return _position;
+                return position;
             }
             set
             {
-                #region Validate
-
-                if (_state == ChunkedStreamState.Closed)
-                    throw new ObjectDisposedException(null);
+                if (chunks == null)
+                {
+                    throw new ObjectDisposedException(nameof(ChunkedStream));
+                }
 
                 if (value < 0)
-                    throw new ArgumentOutOfRangeException(nameof(value));
-
-                if (value < _position && _state == ChunkedStreamState.ReadForward)
-                    throw new InvalidOperationException();
-
-                #endregion
-
-                _position = value;
-
-                if (_state == ChunkedStreamState.ReadForward)
                 {
-                    // in case AsOutputString is called release all chunks in the left
-                    ReleaseLeft();
+                    throw new ArgumentException();
                 }
+
+                position = value;
             }
         }
 
-        // nothing to do
-        public override void Flush()
-        {
-        }
-
-        // move position
         public override long Seek(long offset, SeekOrigin origin)
         {
             switch (origin)
@@ -206,503 +75,483 @@ namespace ChunkedStream
                     Position = offset;
                     break;
                 case SeekOrigin.Current:
-                    Position = checked(_position + offset);
+                    Position = position + offset;
                     break;
                 case SeekOrigin.End:
-                    Position = checked(_length + offset);
+                    Position = length + offset;
                     break;
             }
-            return _position;
+
+            return position;
         }
 
-        // update length for current stream
         public override void SetLength(long value)
         {
-            #region Validate
+            if (chunks == null) throw new ObjectDisposedException(nameof(ChunkedStream));
 
-            if (_state == ChunkedStreamState.Closed)
-                throw new ObjectDisposedException(null);
+            if (length < 0)
+            {
+                throw new Exception();
+            }
 
-            if (_state == ChunkedStreamState.ReadForward)
-                throw new InvalidOperationException();
+            (var newIndex, var newOffset) = GetChunkPosition(value, upperBound: true);
+            (var index, var offset) = GetChunkPosition(length, upperBound: true);
 
-            if (value < 0)
-                throw new ArgumentOutOfRangeException(nameof(value));
+            if (newIndex == index)
+            {
+                if (newOffset > offset && index < chunks.Length)
+                {
+                    chunks[index].AsSpan(offset, newOffset - offset).Clear();
+                }
+            }
+            else if (newIndex > index)
+            {
+                Debug.Assert(newIndex >= chunks.Length || chunks[newIndex].IsNull);
 
-            #endregion
+                if (offset < ChunkSize && index < chunks.Length)
+                {
+                    chunks[index].AsSpan(offset, ChunkSize - offset).Clear();
+                }
+            }
+            else // newIndex < index
+            {
+                index = Math.Min(index, chunks.Length - 1);
 
-            _length = value;
-            _position = Math.Min(_position, _length);
+                for (int i = newIndex + 1; i <= index; i++)
+                {
+                    Return(ref chunks[i]);
+                }
+            }
 
-            // release chunks outside the current length
-            ReleaseRight();
+            position = Math.Min(position, length = value);
         }
 
-        // reads bytes from the stream
-        public int Read(byte* pbuff, int count)
+        public override int ReadByte()
         {
-            #region Validate
+            if (chunks == null) throw new ObjectDisposedException(nameof(ChunkedStream));
 
-            if (_state == ChunkedStreamState.Closed)
-                throw new ObjectDisposedException(null);
-
-            if (count < 0)
-                throw new ArgumentOutOfRangeException(nameof(count));
-
-            #endregion
-
-            count = (int)Math.Min(count, _length - _position);
-
-            int offset, totalRead = 0;
-
-            while (count > 0)
+            if (position < length)
             {
-                var chunk = GetChunkWithOffset(out offset);
-                int toRead = Math.Min(count, _chunkSize - offset);
+                (var index, var offset) = GetChunkPositionToRead();
+                var chunk = chunks[index];
 
-                fixed (byte* pchunk = &chunk.Buffer[chunk.Offset + offset])
-                {
-#if NET20
-                    MemoryCopy(pchunk, pbuff, toRead);
+                position++;
+
+                return chunk.IsNull ? 0 : chunk.Span[offset];
+            }
+
+            return -1;
+        }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            return Read(new Span<byte>(buffer, offset, count));
+        }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="buffer"></param>
+        /// <returns></returns>
+#if NETSTANDARD2_0
+        public int Read(Span<byte> buffer)
 #else
-                    Buffer.MemoryCopy(pchunk, pbuff, toRead, toRead);
+        public override int Read(Span<byte> buffer)
 #endif
-                }
+        {
+            if (chunks == null) throw new ObjectDisposedException(nameof(ChunkedStream));
 
-                _position += toRead;
+            var totalRead = 0;
 
-                if (_state == ChunkedStreamState.ReadForward && (toRead + offset) == _chunkSize || _position == _length)
+            while (buffer.Length > 0 && position < length)
+            {
+                (var index, var offset) = GetChunkPositionToRead();
+
+                var toRead = (int)Math.Min(length - position, chunkPool.ChunkSize - offset);
+                toRead = Math.Min(toRead, buffer.Length);
+
+                Debug.Assert(toRead > 0);
+
+                if (chunks[index].IsNull)
                 {
-                    // means chunk is completed now and can be released
-                    chunk.Dispose();
+                    buffer.Slice(0, toRead).Clear();
+                }
+                else
+                {
+                    chunks[index].AsSpan(offset, toRead).CopyTo(buffer);
                 }
 
-                pbuff += toRead;
+                position += toRead;
                 totalRead += toRead;
-                count -= toRead;
+                buffer = buffer.Slice(toRead);
+
+                Debug.Assert(position <= length);
             }
 
             return totalRead;
         }
 
-        // reads bytes from the stream
-        public override int Read(byte[] buffer, int offset, int count)
-        {
-            #region Validate
-
-            if (_state == ChunkedStreamState.Closed)
-                throw new ObjectDisposedException(null);
-
-            if (buffer == null)
-                throw new NullReferenceException(nameof(buffer));
-
-            if (offset < 0)
-                throw new ArgumentOutOfRangeException(nameof(offset));
-
-            if (count < 0)
-                throw new ArgumentOutOfRangeException(nameof(count));
-
-            if (offset + count > buffer.Length)
-                throw new ArgumentOutOfRangeException(nameof(offset) + " + " + nameof(count));
-
-            #endregion
-
-            if (count > 0)
-            {
-                fixed (byte* pbuff = &buffer[offset])
-                {
-                    return Read(pbuff, count);
-                }
-            }
-            return 0;
-        }
-
-        // reads bytes from the stream
-        public int Read(byte[] buffer)
-        {
-            if (buffer != null && buffer.Length > 0)
-            {
-                fixed (byte* pbuff = buffer)
-                {
-                    return Read(pbuff, buffer.Length);
-                }
-            }
-            return 0;
-        }
-
-        // gets byte from the stream
-        public override int ReadByte()
-        {
-            #region Validate
-
-            if (_state == ChunkedStreamState.Closed)
-                throw new ObjectDisposedException(null);
-
-            #endregion     
-
-            // End of stream
-            if (_position >= _length) return -1;
-
-            int offset, value;
-            var chunk = GetChunkWithOffset(out offset);
-            value = chunk.Buffer[chunk.Offset + offset];
-
-            if (_state == ChunkedStreamState.ReadForward && offset == _chunkSize - 1)
-            {
-                // means chunk is completed now and can be released
-                chunk.Dispose();
-            }
-
-            _position++;
-            return value;
-        }
-
-        // puts bytes from pointer on the stream
-        public void Write(byte* pbuff, int count)
-        {
-            #region Validate
-
-            if (_state == ChunkedStreamState.Closed)
-                throw new ObjectDisposedException(null);
-
-            if (_state == ChunkedStreamState.ReadForward)
-                throw new InvalidOperationException();
-
-            if (count < 0)
-                throw new ArgumentOutOfRangeException(nameof(count));
-
-            #endregion
-
-            while (count > 0)
-            {
-                int offset;
-                var chunk = GetChunkWithOffset(out offset);
-
-                fixed (byte* pchunk = &chunk.Buffer[chunk.Offset + offset])
-                {
-                    int toWrite = Math.Min(count, _chunkSize - offset);
-#if NET20
-                    MemoryCopy(pbuff, pchunk, toWrite);
-#else
-                    Buffer.MemoryCopy(pbuff, pchunk, toWrite, toWrite);
-#endif
-                    _position = checked(_position + toWrite);
-                    pbuff += toWrite;
-                    count -= toWrite;
-                }
-            }
-
-            _length = Math.Max(_length, _position);
-        }
-
-        // puts bytes from buffer on the stream
-        public override void Write(byte[] buffer, int offset, int count)
-        {
-            #region Validate
-
-            if (_state == ChunkedStreamState.Closed)
-                throw new ObjectDisposedException(null);
-
-            if (_state == ChunkedStreamState.ReadForward)
-                throw new InvalidOperationException();
-
-            if (buffer == null)
-                throw new NullReferenceException(nameof(buffer));
-
-            if (offset < 0)
-                throw new ArgumentOutOfRangeException(nameof(offset));
-
-            if (count < 0)
-                throw new ArgumentOutOfRangeException(nameof(count));
-
-            if (offset + count > buffer.Length)
-                throw new ArgumentOutOfRangeException(nameof(offset) + " + " + nameof(count));
-
-            #endregion
-
-            if (count > 0)
-            {
-                fixed (byte* pbuff = &buffer[offset])
-                {
-                    Write(pbuff, count);
-                }
-            }
-        }
-
-        // puts bytes from buffer on the stream
-        public void Write(byte[] buffer)
-        {
-            if (buffer != null && buffer.Length > 0)
-            {
-                fixed (byte* pbuff = buffer)
-                {
-                    Write(pbuff, buffer.Length);
-                }
-            }
-        }
-
-        // puts byte on the stream
         public override void WriteByte(byte value)
         {
-            #region Validate
+            if (chunks == null) throw new ObjectDisposedException(nameof(ChunkedStream));
 
-            if (_state == ChunkedStreamState.Closed)
-                throw new ObjectDisposedException(null);
-
-            if (_state == ChunkedStreamState.ReadForward)
-                throw new InvalidOperationException();
-
-            #endregion
-
-            int offset;
-            var chunk = GetChunkWithOffset(out offset);
-            chunk.Buffer[chunk.Offset + offset] = value;
-            _length = Math.Max(_length, checked(++_position));
+            (var index, var offset) = GetChunkPositionToWrite();
+            chunks[index].Span[offset] = value;
+            length = Math.Max(length, ++position);
         }
 
-        // gets stream bytes
+        public override void Write(byte[] buffer, int offset, int count)
+        {
+            Write(new ReadOnlySpan<byte>(buffer, offset, count));
+        }
+
+#if NETSTANDARD2_0
+        public void Write(ReadOnlySpan<byte> buffer)
+#else
+        public override void Write(ReadOnlySpan<byte> buffer)
+#endif
+        {
+            if (chunks == null) throw new ObjectDisposedException(nameof(ChunkedStream));
+
+            while (buffer.Length > 0)
+            {
+                (var index, var offset) = GetChunkPositionToWrite();
+
+                var target = chunks[index].Data.AsSpan(offset);
+                var toWrite = Math.Min(buffer.Length, target.Length);
+
+                Debug.Assert(toWrite > 0);
+
+                buffer.Slice(0, toWrite).CopyTo(target);
+                buffer = buffer.Slice(toWrite);
+                position += toWrite;
+                length = Math.Max(length, position);
+
+                Debug.Assert(position <= length);
+            }
+        }
+
         public byte[] ToArray()
         {
-            return ToArray(0, (int)Length);
-        }
+            if (chunks == null) throw new ObjectDisposedException(nameof(ChunkedStream));
 
-        // gets specified number of bytes from the stream started from provided offset
-        public byte[] ToArray(int offset, int count)
-        {
-            #region Validate
-
-            if (_state == ChunkedStreamState.Closed)
-                throw new ObjectDisposedException(null);
-
-            if (_state == ChunkedStreamState.ReadForward && offset < _position)
-                throw new InvalidOperationException();
-
-            if (offset < 0)
-                throw new ArgumentOutOfRangeException(nameof(offset));
-
-            if (count < 0)
-                throw new ArgumentOutOfRangeException(nameof(count));
-
-            #endregion
-
-            long tmp = _position;
-            _position = offset;
-
-            var buffer = new byte[count];
-
-            if (count > 0)
+            if (length == 0)
             {
-                fixed (byte* pbuff = buffer)
-                {
-                    Read(pbuff, count);
-                }
+                return Array.Empty<byte>();
             }
 
-            // move back is not allowed
-            if (_state != ChunkedStreamState.ReadForward)
-                _position = tmp;
+            var buffer = new byte[length];
+            var temp = position;
+
+            position = 0;
+            Read(buffer);
+            position = temp;
 
             return buffer;
         }
 
-        // release all chunks
-        public void Clear()
+        public void ForEach(Action<ArraySegment<byte>> action)
         {
-            #region Validate
+            ForEach(0, length, action);
+        }
 
-            if (_state == ChunkedStreamState.Closed)
-                throw new ObjectDisposedException(null);
+        public void ForEach(long from, long to, Action<ArraySegment<byte>> action)
+        {
+            if (chunks == null) throw new ObjectDisposedException(nameof(ChunkedStream));
 
-            if (_state == ChunkedStreamState.ReadForward)
-                throw new InvalidOperationException();
-
-            #endregion
-
-            _position = _length = 0;
-
-            for (int i = 0; i < _chunks.Length; i++)
+            if (from < to)
             {
-                _chunks[i]?.Dispose();
-                _chunks[i] = null;
+                IterateChunks(from, to, false, (chunk, offset, count) =>
+                {
+                    action(new ArraySegment<byte>(chunk, offset, count));
+                });
             }
         }
 
-        /// <summary>
-        /// Moves current stream into ReadForward state. Means that only sequential read operations are allowed.
-        /// Each chunk will be immediately released and put back into pool once it's processed.
-        /// </summary>
-        /// <param name="fromPosition">Initial poistion current stream will be read from.</param>
-        public void AsOutputStream(int fromPosition = 0)
+        public Task ForEachAsync(Func<ArraySegment<byte>, Task> asyncAction)
         {
-            #region Validate
+            return ForEachAsync(0, length, asyncAction);
+        }
 
-            if (_state == ChunkedStreamState.Closed)
-                throw new ObjectDisposedException(null);
+        public Task ForEachAsync(long from, long to, Func<ArraySegment<byte>, Task> asyncAction)
+        {
+            if (chunks == null) throw new ObjectDisposedException(nameof(ChunkedStream));
 
-            if (_state == ChunkedStreamState.ReadForward)
-                throw new InvalidOperationException();
+            if (from < to)
+            {
+                var task = IterateChunksAsync(from, to, false, (chunk, offset, count) =>
+                {
+                    return asyncAction(new ArraySegment<byte>(chunk, offset, count));
+                });
 
-            if (fromPosition < 0)
-                throw new ArgumentOutOfRangeException(nameof(fromPosition));
+                return task;
+            }
 
-            #endregion
+            return Task.CompletedTask;
+        }
 
-            _position = fromPosition;
-            _state = ChunkedStreamState.ReadForward;
+        public void MoveTo(Stream target)
+        {
+            if (chunks == null) throw new ObjectDisposedException(nameof(ChunkedStream));
 
-            ReleaseLeft();
+            if (position < length)
+            {
+                IterateChunks(position, length, true, (chunk, offset, count) =>
+                {
+                    target.Write(chunk, offset, count);
+                });
+
+                length = position;
+            }
+        }
+
+        public Task MoveToAsync(Stream target)
+        {
+            return MoveToAsync(target, CancellationToken.None);
+        }
+
+        public Task MoveToAsync(Stream target, CancellationToken cancellationToken)
+        {
+            if (chunks == null) throw new ObjectDisposedException(nameof(ChunkedStream));
+
+            if (position < length)
+            {
+                var task = IterateChunksAsync(position, length, true, (chunk, offset, count) =>
+                {
+                    return target.WriteAsync(chunk, offset, count, cancellationToken);
+                });
+
+                return task.ContinueWith(_ => length = position);
+            }
+
+            return Task.CompletedTask;
+        }
+
+        public IBufferWriter<byte> GetWriter()
+        {
+            return GetWriter(ArrayPool<byte>.Shared);
+        }
+
+        public IBufferWriter<byte> GetWriter(ArrayPool<byte> pool)
+        {
+            if (chunks == null) throw new ObjectDisposedException(nameof(ChunkedStream));
+            if (pool == null) throw new ArgumentNullException();
+
+            return new BufferWriter(this, pool);
+        }
+
+        public override void Flush()
+        {
+            if (chunks == null) throw new ObjectDisposedException(nameof(ChunkedStream));
         }
 
         protected override void Dispose(bool disposing)
         {
-            if (_asOutputStreamOnDispose && _state == ChunkedStreamState.ReadWrite)
+            try
             {
-                // do not release chunks, but move to the start and switch to ReadForward state
-                // chunks wll be released while reading, stream modifications will be not allowed
-                AsOutputStream();
-                return;
-            }
-
-            base.Dispose(disposing);
-
-            if (_state != ChunkedStreamState.Closed && disposing)
-            {
-                for (int i = 0; i < _chunks.Length; i++)
+                if (disposing && chunks != null)
                 {
-                    _chunks[i]?.Dispose();
-                    _chunks[i] = null;
+                    (var index, var _) = GetChunkPosition(length);
+
+                    index = Math.Min(index, chunks.Length - 1);
+
+                    while (index >= 0)
+                    {
+                        Return(ref chunks[index--]);
+                    }
+
+                    Debug.Assert(chunks.All(x => x.IsNull));
+
+                    arrayPool.Return(chunks);
+                    position = length = 0;
+                    chunks = null;
                 }
-                _chunks = null;
-                _state = ChunkedStreamState.Closed;
+            }
+            finally
+            {
+                base.Dispose(disposing);
             }
         }
 
-        #region Internal Chunk Managemet
-
-        // get chunk from pool or from managed heap, in case, when pool is empty or not available  
-        private IChunk CreateChunk()
+        private void IterateChunks(long from, long to, bool release, Action<byte[], int, int> action)
         {
-            return _pool == null
-                ? new MemoryChunk(_chunkSize)
-                : _pool.GetChunk(); // pool will retrun chunk from the heap once it's empty
+            Debug.Assert(from >= 0 && from < to && to <= length);
+            Debug.Assert(!release || to == length); // Do not release in the middle of chunks.            
+
+            (var lo, var loOffset) = GetChunkPosition(from);
+            (var hi, var hiOffset) = GetChunkPosition(to, upperBound: true);
+
+            var originalPos = position;
+            var originalLen = length;
+
+            EnsureCapacity(hi);
+
+            for (int i = lo; i <= hi; i++)
+            {
+                var chunkFrom = i == lo ? loOffset : 0;
+                var chunkTo = i == hi ? hiOffset : ChunkSize;
+
+                if (chunks[i].IsNull)
+                {
+                    chunks[i] = chunkPool.Rent(clear: true);
+                }
+
+                action(chunks[i].Data.Array, chunks[i].Data.Offset + chunkFrom, chunkTo - chunkFrom);
+
+                if (originalPos != position && originalLen != length)
+                {
+                    throw new Exception();
+                }
+
+                if (release && (i > lo || chunkFrom == 0))
+                {
+                    chunkPool.Return(ref chunks[i]);
+                }
+            }
         }
 
-        // gets chunk with local chunk offset corresponding to current position
-        private IChunk GetChunkWithOffset(out int offset)
+        private async Task IterateChunksAsync(long from, long to, bool release, Func<byte[], int, int, Task> asyncAction)
         {
-            int index = GetChunkIndexWithOffset(_position, out offset);
-            EnsureChunksCapacity(index);
+            Debug.Assert(from >= 0 && from < to && to <= length);
+            Debug.Assert(!release || to == length); // Do not release in the middle of chunks.            
 
-            var chunk = _chunks[index];
-            if (chunk == null)
+            (var lo, var loOffset) = GetChunkPosition(from);
+            (var hi, var hiOffset) = GetChunkPosition(to, upperBound: true);
+
+            var originalPos = position;
+            var originalLen = length;
+
+            EnsureCapacity(hi);
+
+            for (int i = lo; i <= hi; i++)
             {
-                chunk = CreateChunk();
-                _chunks[index] = chunk;
-            }
+                var chunkFrom = i == lo ? loOffset : 0;
+                var chunkTo = i == hi ? hiOffset : ChunkSize;
 
-            return chunk;
+                if (chunks[i].IsNull)
+                {
+                    chunks[i] = chunkPool.Rent(clear: true);
+                }
+
+                await asyncAction(chunks[i].Data.Array, chunks[i].Data.Offset + chunkFrom, chunkTo - chunkFrom);
+
+                if (originalPos != position && originalLen != length)
+                {
+                    throw new Exception();
+                }
+
+                if (release && (i > lo || chunkFrom == 0))
+                {
+                    chunkPool.Return(ref chunks[i]);
+                }
+            }
         }
 
-        // expands _chunks to handle index if necessary
-        private void EnsureChunksCapacity(int index)
+        private (int, int) GetChunkPositionToRead()
         {
-            if (_chunks.Length <= index)
-            {
-                var tmp = new IChunk[Math.Max(_chunks.Length * 2, index + 1)];
-                _chunks.CopyTo(tmp, 0);
-                _chunks = tmp;
-            }
+            (var index, var offset) = GetChunkPosition(position);
+            EnsureCapacity(index);
+            return (index, offset);
         }
 
-        // release chunks beyond the current length
-        private void ReleaseRight()
+        private (int, int) GetChunkPositionToWrite()
         {
-            // if offset > 0 (so chunk is partially used) - skip current chunk or release otherwise
-            int offset, index = GetChunkIndexWithOffset(_length, out offset) + Math.Sign(offset);
+            (var index, var offset) = GetChunkPosition(position);
 
-            for (; index < _chunks.Length; index++)
+            EnsureCapacity(index);
+
+            if (position > length)
             {
-                _chunks[index]?.Dispose();
-                _chunks[index] = null;
+                SetLength(position);
             }
+
+            if (chunks[index].IsNull)
+            {
+                chunks[index] = chunkPool.Rent(clear: offset > 0 || length > position);
+            }
+
+            return (index, offset);
         }
 
-        // release chunks beyond the current position
-        private void ReleaseLeft()
+        private (int, int) GetChunkPosition(long offset, bool upperBound = false)
         {
-            int offset, index = GetChunkIndexWithOffset(_position, out offset);
+            var chunkIndex = (int)(offset / ChunkSize);
+            var chunkOffset = (int)(offset % ChunkSize);
 
-            for (int i = 0; i < index; i++)
+            if (upperBound && chunkOffset == 0)
             {
-                _chunks[i]?.Dispose();
-                _chunks[i] = null;
+                return (chunkIndex - 1, ChunkSize);
             }
+
+            return (chunkIndex, chunkOffset);
         }
 
-        // get chunk index and offset corresponding position provided
-        private int GetChunkIndexWithOffset(long position, out int offset)
+        private void EnsureCapacity(int index)
         {
-            if (position < _chunkSize)
+            if (index >= chunks.Length)
             {
-                offset = (int)position;
-                return 0;
-            }
-            else
-            {
-                offset = (int)(position % _chunkSize);
-                return checked((int)(position / _chunkSize));
+                var temp = arrayPool.Rent(index + 1);
+
+                Debug.Assert(temp.All(x => x.IsNull));
+
+                chunks.CopyTo(temp, 0);
+                arrayPool.Return(chunks, clearArray: true);
+                chunks = temp;
             }
         }
 
-        #endregion
-
-#if NET20
-
-        // custom MemoryCopy for .Net 2.0 Framework support
-
-        private static void MemoryCopy(byte* psource, byte* ptarget, int count)
+        private void Return(ref Chunk chunk)
         {
-            int n = count >> 3;
-            
-            // first copy by 8 bytes in loop
-            while (n-- > 0)
+            if (!chunk.IsNull)
             {
-                *(long*)(ptarget) = *(long*)(psource);
-                ptarget += 8;
-                psource += 8;
-            }
-
-            // and then copy last 1 - 7 bytes
-            switch (count & 0x00000007)
-            {
-                case 1:
-                    *(ptarget) = *(psource);
-                    break;
-                case 2:
-                    *(short*)(ptarget) = *(short*)(psource);
-                    break;
-                case 3:
-                    *(ptarget) = *(psource);
-                    *(short*)(ptarget + 1) = *(short*)(psource + 1);
-                    break;
-                case 4:
-                    *(int*)(ptarget) = *(int*)(psource);
-                    break;
-                case 5:
-                    *(ptarget) = *(psource);
-                    *(int*)(ptarget + 1) = *(int*)(psource + 1);
-                    break;
-                case 6:
-                    *(short*)(ptarget) = *(short*)(psource);
-                    *(int*)(ptarget + 2) = *(int*)(psource + 2);
-                    break;
-                case 7:
-                    *(ptarget) = *(psource);
-                    *(short*)(ptarget + 1) = *(short*)(psource + 1);
-                    *(int*)(ptarget + 3) = *(int*)(psource + 3);
-                    break;
+                chunkPool.Return(ref chunk);
             }
         }
-#endif
+
+        private sealed class BufferWriter : IBufferWriter<byte>
+        {
+            private readonly ArrayPool<byte> pool;
+            private readonly ChunkedStream stream;
+            private byte[] tempBuffer;
+
+            public BufferWriter(ChunkedStream stream, ArrayPool<byte> pool)
+            {
+                this.pool = pool;
+                this.stream = stream;
+            }
+
+            public void Advance(int count)
+            {
+                if (tempBuffer == null)
+                {
+                    stream.position += count;
+                    stream.length = Math.Max(stream.length, stream.position);
+                }
+                else
+                {
+                    stream.Write(tempBuffer, 0, count);
+                    pool.Return(tempBuffer);
+                    tempBuffer = null;
+                }
+            }
+
+            public Memory<byte> GetMemory(int sizeHint = 0)
+            {
+                (var index, var offset) = stream.GetChunkPositionToWrite();
+
+                if (sizeHint == 0 || sizeHint <= (stream.chunkPool.ChunkSize - offset))
+                {
+                    return stream.chunks[index].Data.AsMemory(offset);
+                }
+
+                tempBuffer = pool.Rent(sizeHint);
+                return new Memory<byte>(tempBuffer);
+            }
+
+            public Span<byte> GetSpan(int sizeHint = 0)
+            {
+                return GetMemory(sizeHint).Span;
+            }
+        }
     }
 }
