@@ -6,6 +6,15 @@
 
   <PropertyGroup>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Authors>Raman Yanovich</Authors>
+    <Company>Raman Yanovich</Company>
+    <Description>An in-memory stream implementation for .NET that uses a shared buffer to store data.</Description>
+    <Copyright>Copyright (c) Raman Yanovich 2022</Copyright>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/ryanovic/ChunkedStream</PackageProjectUrl>
+    <RepositoryType>git</RepositoryType>
+    <RepositoryUrl>https://github.com/ryanovic/ChunkedStream</RepositoryUrl>
+    <PackageTags>IO memory pool chunked stream</PackageTags>
   </PropertyGroup>
 
   <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
