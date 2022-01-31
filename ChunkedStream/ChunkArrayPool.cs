@@ -5,6 +5,9 @@
 
     public static class ChunkArrayPool
     {
+        /// <summary>
+        /// Returns a pool that allocates arrays directly on the heap.
+        /// </summary>
         public static ArrayPool<Chunk> Empty { get; } = new EmptyChunkArrayPool();
 
         public static ArrayPool<Chunk> Create() => ArrayPool<Chunk>.Create();

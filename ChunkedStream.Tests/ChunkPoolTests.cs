@@ -71,22 +71,13 @@ namespace ChunkedStream.Tests
         public void Creates_Chunk_From_Pool()
         {
             var pool = new ChunkPool(8, 10);
-            var chunks = new Chunk[pool.ChunkCount];
+            var chunks = new Chunk[10];
 
             for (int i = 0; i < chunks.Length; i++)
             {
                 chunks[i] = pool.Rent();
                 Assert.True(chunks[i].IsFromPool);
             }
-
-            Assert.Equal(0, pool.ChunkCount);
-
-            for (int i = 0; i < chunks.Length; i++)
-            {
-                pool.Return(ref chunks[i]);
-            }
-
-            Assert.Equal(10, pool.ChunkCount);
         }
 
         [Fact]

@@ -5,8 +5,24 @@
     using System.Text;
     using System.Threading;
 
+    /// <summary>
+    /// <see cref="IChunkPool"/> interface implementation that uses a shared single buffer divided in multiple chunks.
+    /// </summary>
     public unsafe sealed class ChunkPool : IChunkPool
     {
+        private static long totalPoolAllocated;
+        private static long totalMemoryAllocated;
+
+        /// <summary>
+        /// Returns a total number of bytes currently allocated in all buffers.
+        /// </summary>
+        public static long TotalPoolAllocated => Interlocked.Read(ref totalPoolAllocated);
+
+        /// <summary>
+        /// Returns a total number of bytes currently allocated on the heap, when a pool failed to return a chunk from its buffer.
+        /// </summary>
+        public static long TotalMemoryAllocated => Interlocked.Read(ref totalMemoryAllocated);
+
         private const int MaxBufferLength = 0x7FFFFFC7;
         private const int MinChunkSize = 4;
         private const int MinChunkCount = 1;
@@ -15,12 +31,10 @@
 
         private readonly byte[] buffer;
         private readonly int chunkSize;
-        private int chunkCount;
         private int next;
         private SpinLock spinLock;
 
         public int ChunkSize => chunkSize;
-        public int ChunkCount => chunkCount;
 
         public ChunkPool()
             : this(DefaultChunkSize, DefaultChunkCount)
@@ -29,20 +43,23 @@
 
         public ChunkPool(int chunkSize, int chunkCount)
         {
-            if (chunkSize < MinChunkSize) throw new Exception();
-            if (chunkCount < MinChunkCount) throw new Exception();
-            if ((long)chunkSize * chunkCount > MaxBufferLength) throw new Exception();
+            if (chunkSize < MinChunkSize) throw new ArgumentOutOfRangeException(nameof(chunkSize), Errors.PoolMinChunkSize(MinChunkSize));
+            if (chunkCount < MinChunkCount) throw new ArgumentOutOfRangeException(nameof(chunkCount), Errors.PoolMinChunkCount(MinChunkCount));
+            if ((long)chunkSize * chunkCount > MaxBufferLength) throw new InvalidOperationException(Errors.PoolMaxBufferSize(MaxBufferLength));
 
             this.buffer = new byte[chunkSize * chunkCount];
             this.chunkSize = chunkSize;
-            this.chunkCount = chunkCount;
             InitializeBuffer(buffer, chunkSize);
         }
 
+        /// <summary>
+        /// Gets a chunk from the pool if available.
+        /// </summary>
         public bool TryRentFromPool(out Chunk chunk, bool clear = false)
         {
-            var offset = GetNextOffset();
             chunk = default(Chunk);
+
+            var offset = GetNextOffset();
 
             if (offset != Chunk.InvalidHandle)
             {
@@ -53,6 +70,9 @@
             return false;
         }
 
+        /// <summary>
+        /// Gets a chunk from the pool, if available, or from the heap otherwise.
+        /// </summary>
         public Chunk Rent(bool clear = false)
         {
             var offset = GetNextOffset();
@@ -65,51 +85,56 @@
             return CreateChunkFromMemory();
         }
 
+        /// <summary>
+        /// Returns a chunk to the pool. 
+        /// </summary>
         public void Return(ref Chunk chunk)
         {
+            if (chunk.IsNull) throw new ArgumentException(Errors.ChunkIsNull(), nameof(chunk));
+
             if (chunk.IsFromPool)
             {
                 if (chunk.Data.Array != buffer)
                 {
-                    throw new InvalidOperationException();
+                    throw new InvalidOperationException(Errors.ChunkIsImposter());
                 }
 
+                Interlocked.Add(ref totalPoolAllocated, -ChunkSize);
                 Return(chunk.Handle);
-                Interlocked.Increment(ref chunkCount);
+            }
+            else
+            {
+                Interlocked.Add(ref totalMemoryAllocated, -ChunkSize);
             }
 
             chunk = default;
         }
 
-        public bool TryReturn(ref Chunk chunk)
+        /// <summary>
+        /// Check if the chunk belongs to this pool.
+        /// </summary>
+        public bool IsFromPool(in Chunk chunk)
         {
-            if (chunk.IsFromPool && chunk.Data.Array == buffer)
-            {
-                Return(chunk.Handle);
-                Interlocked.Increment(ref chunkCount);
-
-                chunk = default;
-                return true;
-            }
-
-            return false;
+            return chunk.IsFromPool && chunk.Data.Array == buffer;
         }
 
         private Chunk CreateChunkFromPool(int offset, bool clear)
         {
-            Interlocked.Decrement(ref chunkCount);
-
             if (clear)
             {
                 Array.Clear(buffer, offset, chunkSize);
             }
 
-            return new Chunk(offset, new ArraySegment<byte>(buffer, offset, chunkSize));
+            var chunk = new Chunk(offset, new ArraySegment<byte>(buffer, offset, chunkSize));
+            Interlocked.Add(ref totalPoolAllocated, ChunkSize);
+            return chunk;
         }
 
         private Chunk CreateChunkFromMemory()
         {
-            return new Chunk(new byte[chunkSize]);
+            var chunk = new Chunk(new byte[chunkSize]);
+            Interlocked.Add(ref totalMemoryAllocated, ChunkSize);
+            return chunk;
         }
 
         private int GetNextOffset()
@@ -127,7 +152,8 @@
 
         private int GetNextOffset(byte* pbuff)
         {
-            bool lockTaken = false;
+            var lockTaken = false;
+            var offset = Chunk.InvalidHandle;
 
             try
             {
@@ -135,9 +161,8 @@
 
                 if (next != Chunk.InvalidHandle)
                 {
-                    var offset = this.next;
+                    offset = this.next;
                     this.next = *(int*)(pbuff + next);
-                    return offset;
                 }
             }
             finally
@@ -145,7 +170,7 @@
                 if (lockTaken) spinLock.Exit();
             }
 
-            return Chunk.InvalidHandle;
+            return offset;
         }
 
         private void Return(int offset)

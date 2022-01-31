@@ -9,6 +9,9 @@
     using System.Threading;
     using System.Diagnostics;
 
+    /// <summary>
+    /// Implements a stream class that uses a sequence of in-memory chunks to store data.
+    /// </summary>
     public sealed class ChunkedStream : Stream
     {
         private const int DefaultChunkArraySize = 4;
@@ -35,16 +38,34 @@
             this.chunks = arrayPool.Rent(DefaultChunkArraySize);
         }
 
+        /// <summary>
+        /// Gets the chunks size defined for the current stream.
+        /// </summary>
         public int ChunkSize => chunkPool.ChunkSize;
 
+        /// <summary>
+        /// Gets a value indicating whether the current stream supports reading.
+        /// </summary>
         public override bool CanRead => true;
 
+        /// <summary>
+        /// Gets a value indicating whether the current stream supports seeking.
+        /// </summary>
         public override bool CanSeek => true;
 
+        /// <summary>
+        /// Gets a value indicating whether the current stream supports writing.
+        /// </summary>
         public override bool CanWrite => true;
 
+        /// <summary>
+        /// Gets the length in bytes of the stream.
+        /// </summary>
         public override long Length => length;
 
+        /// <summary>
+        /// Gets or sets the position within the current stream.
+        /// </summary>
         public override long Position
         {
             get
@@ -60,13 +81,16 @@
 
                 if (value < 0)
                 {
-                    throw new ArgumentException();
+                    throw new ArgumentOutOfRangeException(nameof(value), Errors.NegativeNumber("Position"));
                 }
 
                 position = value;
             }
         }
 
+        /// <summary>
+        /// Sets the position within the current stream.
+        /// </summary>
         public override long Seek(long offset, SeekOrigin origin)
         {
             switch (origin)
@@ -85,14 +109,13 @@
             return position;
         }
 
+        /// <summary>
+        /// Sets the length of the current stream
+        /// </summary>
         public override void SetLength(long value)
         {
             if (chunks == null) throw new ObjectDisposedException(nameof(ChunkedStream));
-
-            if (length < 0)
-            {
-                throw new Exception();
-            }
+            if (length < 0) throw new ArgumentOutOfRangeException(nameof(value), Errors.NegativeNumber("Length"));
 
             (var newIndex, var newOffset) = GetChunkPosition(value, upperBound: true);
             (var index, var offset) = GetChunkPosition(length, upperBound: true);
@@ -101,6 +124,7 @@
             {
                 if (newOffset > offset && index < chunks.Length)
                 {
+                    // Clear [size .. new-size] range.
                     chunks[index].AsSpan(offset, newOffset - offset).Clear();
                 }
             }
@@ -108,6 +132,8 @@
             {
                 Debug.Assert(newIndex >= chunks.Length || chunks[newIndex].IsNull);
 
+                // New length is pointing to some uninitialized chunk(by design).
+                // Clear [size ...].
                 if (offset < ChunkSize && index < chunks.Length)
                 {
                     chunks[index].AsSpan(offset, ChunkSize - offset).Clear();
@@ -117,6 +143,7 @@
             {
                 index = Math.Min(index, chunks.Length - 1);
 
+                // Release chunks right to new length.
                 for (int i = newIndex + 1; i <= index; i++)
                 {
                     Return(ref chunks[i]);
@@ -143,16 +170,17 @@
             return -1;
         }
 
+        /// <summary>
+        /// Reads a sequence of bytes from the current stream and advances the position within the stream by the number of bytes read.
+        /// </summary>
         public override int Read(byte[] buffer, int offset, int count)
         {
             return Read(new Span<byte>(buffer, offset, count));
         }
 
         /// <summary>
-        /// 
+        /// Reads a sequence of bytes from the current stream and advances the position within the stream by the number of bytes read.
         /// </summary>
-        /// <param name="buffer"></param>
-        /// <returns></returns>
 #if NETSTANDARD2_0
         public int Read(Span<byte> buffer)
 #else
@@ -200,11 +228,17 @@
             length = Math.Max(length, ++position);
         }
 
+        /// <summary>
+        /// Writes a sequence of bytes to the current stream and advances the current position within this stream by the number of bytes written.
+        /// </summary>
         public override void Write(byte[] buffer, int offset, int count)
         {
             Write(new ReadOnlySpan<byte>(buffer, offset, count));
         }
 
+        /// <summary>
+        /// Writes a sequence of bytes to the current stream and advances the current position within this stream by the number of bytes written.
+        /// </summary>
 #if NETSTANDARD2_0
         public void Write(ReadOnlySpan<byte> buffer)
 #else
@@ -231,6 +265,9 @@
             }
         }
 
+        /// <summary>
+        /// Copies the entire stream to an array. Does not affect he current position.
+        /// </summary>
         public byte[] ToArray()
         {
             if (chunks == null) throw new ObjectDisposedException(nameof(ChunkedStream));
@@ -250,14 +287,26 @@
             return buffer;
         }
 
+        /// <summary>
+        /// Executes <paramref name="action"/> for each chunk in the current stream. Does not affect he current position.
+        /// </summary>
         public void ForEach(Action<ArraySegment<byte>> action)
         {
             ForEach(0, length, action);
         }
 
+        /// <summary>
+        /// Executes <paramref name="action"/> for each chunk in the specified range. Does not affect he current position.
+        /// </summary>
+        /// <param name="from">The inclusive position in the stream to start from.</param>
+        /// <param name="to">The exclusive position in the stream where to end.</param>
+        /// <param name="action">User defined hander.</param>
         public void ForEach(long from, long to, Action<ArraySegment<byte>> action)
         {
             if (chunks == null) throw new ObjectDisposedException(nameof(ChunkedStream));
+            if (from < 0) throw new ArgumentOutOfRangeException(nameof(from));
+            if (to > length) throw new ArgumentOutOfRangeException(nameof(to));
+            if (from > to) throw new InvalidOperationException(Errors.ReversedOrder());
 
             if (from < to)
             {
@@ -268,14 +317,26 @@
             }
         }
 
+        /// <summary>
+        /// Executes <paramref name="asyncAction"/> for each chunk in the current stream. Does not affect he current position.
+        /// </summary>
         public Task ForEachAsync(Func<ArraySegment<byte>, Task> asyncAction)
         {
             return ForEachAsync(0, length, asyncAction);
         }
 
+        /// <summary>
+        /// Executes <paramref name="asyncAction"/> for each chunk in the specified range. Does not affect he current position.
+        /// </summary>
+        /// <param name="from">The inclusive position in the stream to start from.</param>
+        /// <param name="to">The exclusive position in the stream where to end.</param>
+        /// <param name="asyncAction">User defined hander.</param>
         public Task ForEachAsync(long from, long to, Func<ArraySegment<byte>, Task> asyncAction)
         {
             if (chunks == null) throw new ObjectDisposedException(nameof(ChunkedStream));
+            if (from < 0) throw new ArgumentOutOfRangeException(nameof(from));
+            if (to > length) throw new ArgumentOutOfRangeException(nameof(to));
+            if (from > to) throw new InvalidOperationException(Errors.ReversedOrder());
 
             if (from < to)
             {
@@ -290,6 +351,9 @@
             return Task.CompletedTask;
         }
 
+        /// <summary>
+        /// Writes all bytes from the current position to another stream then removes them from the current stream.
+        /// </summary>
         public void MoveTo(Stream target)
         {
             if (chunks == null) throw new ObjectDisposedException(nameof(ChunkedStream));
@@ -305,11 +369,17 @@
             }
         }
 
+        /// <summary>
+        /// Writes all bytes from the current position to another stream then removes them from the current stream.
+        /// </summary>
         public Task MoveToAsync(Stream target)
         {
             return MoveToAsync(target, CancellationToken.None);
         }
 
+        /// <summary>
+        /// Writes all bytes from the current position to another stream then removes them from the current stream.
+        /// </summary>
         public Task MoveToAsync(Stream target, CancellationToken cancellationToken)
         {
             if (chunks == null) throw new ObjectDisposedException(nameof(ChunkedStream));
@@ -327,15 +397,21 @@
             return Task.CompletedTask;
         }
 
+        /// <summary>
+        /// Creates a <see cref="IBufferWriter{T}"/> for the current stream.
+        /// </summary>
         public IBufferWriter<byte> GetWriter()
         {
             return GetWriter(ArrayPool<byte>.Shared);
         }
 
+        /// <summary>
+        /// Creates a <see cref="IBufferWriter{T}"/> for the current stream.
+        /// </summary>
         public IBufferWriter<byte> GetWriter(ArrayPool<byte> pool)
         {
             if (chunks == null) throw new ObjectDisposedException(nameof(ChunkedStream));
-            if (pool == null) throw new ArgumentNullException();
+            if (pool == null) throw new ArgumentNullException(nameof(pool));
 
             return new BufferWriter(this, pool);
         }
@@ -351,7 +427,8 @@
             {
                 if (disposing && chunks != null)
                 {
-                    (var index, var _) = GetChunkPosition(length);
+                    // It could be one chunk allocated beyond the length if an exception occurs during the write, hence upperBound is FALSE.
+                    (var index, var _) = GetChunkPosition(length, upperBound: false);
 
                     index = Math.Min(index, chunks.Length - 1);
 
@@ -376,7 +453,7 @@
         private void IterateChunks(long from, long to, bool release, Action<byte[], int, int> action)
         {
             Debug.Assert(from >= 0 && from < to && to <= length);
-            Debug.Assert(!release || to == length); // Do not release in the middle of chunks.            
+            Debug.Assert(!release || to == length); // Do not release in the middle.
 
             (var lo, var loOffset) = GetChunkPosition(from);
             (var hi, var hiOffset) = GetChunkPosition(to, upperBound: true);
@@ -396,11 +473,13 @@
                     chunks[i] = chunkPool.Rent(clear: true);
                 }
 
+                Debug.Assert(chunkFrom < chunkTo);
+
                 action(chunks[i].Data.Array, chunks[i].Data.Offset + chunkFrom, chunkTo - chunkFrom);
 
-                if (originalPos != position && originalLen != length)
+                if (originalPos != position || originalLen != length)
                 {
-                    throw new Exception();
+                    throw new InvalidOperationException(Errors.StreamIsChanged());
                 }
 
                 if (release && (i > lo || chunkFrom == 0))
@@ -413,7 +492,7 @@
         private async Task IterateChunksAsync(long from, long to, bool release, Func<byte[], int, int, Task> asyncAction)
         {
             Debug.Assert(from >= 0 && from < to && to <= length);
-            Debug.Assert(!release || to == length); // Do not release in the middle of chunks.            
+            Debug.Assert(!release || to == length); // Do not release in the middle.
 
             (var lo, var loOffset) = GetChunkPosition(from);
             (var hi, var hiOffset) = GetChunkPosition(to, upperBound: true);
@@ -433,11 +512,13 @@
                     chunks[i] = chunkPool.Rent(clear: true);
                 }
 
+                Debug.Assert(chunkFrom < chunkTo);
+
                 await asyncAction(chunks[i].Data.Array, chunks[i].Data.Offset + chunkFrom, chunkTo - chunkFrom);
 
-                if (originalPos != position && originalLen != length)
+                if (originalPos != position || originalLen != length)
                 {
-                    throw new Exception();
+                    throw new InvalidOperationException(Errors.StreamIsChanged());
                 }
 
                 if (release && (i > lo || chunkFrom == 0))
@@ -462,11 +543,13 @@
 
             if (position > length)
             {
+                // Reset [length .. position) bytes.
                 SetLength(position);
             }
 
             if (chunks[index].IsNull)
             {
+                // Zero a chunk if it's allocating in the middle of the stream.
                 chunks[index] = chunkPool.Rent(clear: offset > 0 || length > position);
             }
 
@@ -475,15 +558,21 @@
 
         private (int, int) GetChunkPosition(long offset, bool upperBound = false)
         {
-            var chunkIndex = (int)(offset / ChunkSize);
+            var chunkIndex = offset / ChunkSize;
             var chunkOffset = (int)(offset % ChunkSize);
+
+            if (chunkIndex > Int32.MaxValue)
+            {
+                throw new InvalidOperationException(Errors.StreamMaxSize());
+            }
 
             if (upperBound && chunkOffset == 0)
             {
-                return (chunkIndex - 1, ChunkSize);
+                // For upper bound return the end of the previous chunk.
+                return ((int)chunkIndex - 1, ChunkSize);
             }
 
-            return (chunkIndex, chunkOffset);
+            return ((int)chunkIndex, chunkOffset);
         }
 
         private void EnsureCapacity(int index)

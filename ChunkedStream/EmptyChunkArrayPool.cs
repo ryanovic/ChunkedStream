@@ -11,7 +11,7 @@
         {
             if (minimumLength < 0)
             {
-                throw new ArgumentException();
+                throw new ArgumentException(Errors.NegativeNumber("Array length"), nameof(minimumLength));
             }
 
             if (minimumLength > MaxLengthToAlign)
@@ -39,6 +39,7 @@
 
         public override void Return(Chunk[] array, bool clearArray = false)
         {
+            // Just do nothing. 
         }
     }
 }
