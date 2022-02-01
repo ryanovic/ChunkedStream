@@ -29,7 +29,7 @@ Task ForEachAsync(Func<ArraySegment<byte>, Task> asyncAction);
 Task ForEachAsync(long from, long to, Func<ArraySegment<byte>, Task> asyncAction);
 ```
 
-Set of methods that can be used to iterate through the chunks. ***Do not*** affect the current position of the stream.
+Set of methods that can be used to iterate through the chunks. **Do not** affect the current position of the stream.
 
 ``` C#
 void MoveTo(Stream target);
