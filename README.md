@@ -1,6 +1,6 @@
 An in-memory stream implementation for .NET that uses a shared buffer to store data.
 
-[![NuGet version (ChunkedStream)](https://img.shields.io/nuget/v/ChunkedStream.svg?style=flat-square)](https://www.nuget.org/packages/ChunkedStream/)
+[![NuGet version (Ry.IO.ChunkedStream)](https://img.shields.io/nuget/v/Ry.IO.ChunkedStream.svg?style=flat-square)](https://www.nuget.org/packages/Ry.IO.ChunkedStream/)
 
 ## Overview
 
