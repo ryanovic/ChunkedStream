@@ -1,42 +1,45 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-using Xunit;
-
-public class TestPool : IChunkPool
+﻿namespace Ry.IO
 {
-    public int ChunkSize { get; set; }
+    using System;
+    using System.Collections.Generic;
+    using System.Text;
+    using Xunit;
 
-    public int Available;
-    public int Allocated;
-    public int Total => Available + Allocated;
-
-    public TestPool(int chunkSize)
+    public class TestPool : IChunkPool
     {
-        this.ChunkSize = chunkSize;
-    }
+        public int ChunkSize { get; set; }
 
-    public Chunk Rent(bool clear = false)
-    {
-        Allocated++;
-        Available = Math.Max(0, Available - 1);
+        public int Available;
+        public int Allocated;
+        public int Total => Available + Allocated;
 
-        var buffer = new byte[ChunkSize];
-
-        if (!clear)
+        public TestPool(int chunkSize)
         {
-            Array.Fill(buffer, Byte.MaxValue);
+            this.ChunkSize = chunkSize;
         }
 
-        return new Chunk(buffer);
-    }
+        public Chunk Rent(bool clear = false)
+        {
+            Allocated++;
+            Available = Math.Max(0, Available - 1);
 
-    public void Return(ref Chunk chunk)
-    {
-        Assert.False(chunk.IsNull);
+            var buffer = new byte[ChunkSize];
 
-        chunk = default(Chunk);
-        Available++;
-        Allocated--;
+            if (!clear)
+            {
+                Array.Fill(buffer, Byte.MaxValue);
+            }
+
+            return new Chunk(buffer);
+        }
+
+        public void Return(ref Chunk chunk)
+        {
+            Assert.False(chunk.IsNull);
+
+            chunk = default(Chunk);
+            Available++;
+            Allocated--;
+        }
     }
 }

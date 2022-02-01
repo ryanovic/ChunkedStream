@@ -1,19 +1,22 @@
-﻿using System;
-
-/// <summary>
-/// Represents a pool of chunks of specific size.
-/// </summary>
-public interface IChunkPool
+﻿namespace Ry.IO
 {
-    int ChunkSize { get; }
+    using System;
 
     /// <summary>
-    /// Gets a chunk from the pool.
+    /// Represents a pool of chunks of specific size.
     /// </summary>
-    Chunk Rent(bool clear = false);
+    public interface IChunkPool
+    {
+        int ChunkSize { get; }
 
-    /// <summary>
-    /// Returns a chunk to the pool. 
-    /// </summary>
-    void Return(ref Chunk chunk);
+        /// <summary>
+        /// Gets a chunk from the pool.
+        /// </summary>
+        Chunk Rent(bool clear = false);
+
+        /// <summary>
+        /// Returns a chunk to the pool. 
+        /// </summary>
+        void Return(ref Chunk chunk);
+    }
 }
