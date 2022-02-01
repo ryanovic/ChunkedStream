@@ -20,7 +20,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\ChunkedStream\Ry.IO.ChunkedStream.csproj" />
+    <ProjectReference Include="..\Ry.IO.ChunkedStream\Ry.IO.ChunkedStream.csproj" />
   </ItemGroup>
 
 </Project>
