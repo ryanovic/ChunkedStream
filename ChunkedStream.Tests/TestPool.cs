@@ -3,43 +3,40 @@ using System.Collections.Generic;
 using System.Text;
 using Xunit;
 
-namespace ChunkedStream.Tests
+public class TestPool : IChunkPool
 {
-    public class TestPool : IChunkPool
+    public int ChunkSize { get; set; }
+
+    public int Available;
+    public int Allocated;
+    public int Total => Available + Allocated;
+
+    public TestPool(int chunkSize)
     {
-        public int ChunkSize { get; set; }
+        this.ChunkSize = chunkSize;
+    }
 
-        public int Available;
-        public int Allocated;
-        public int Total => Available + Allocated;
+    public Chunk Rent(bool clear = false)
+    {
+        Allocated++;
+        Available = Math.Max(0, Available - 1);
 
-        public TestPool(int chunkSize)
+        var buffer = new byte[ChunkSize];
+
+        if (!clear)
         {
-            this.ChunkSize = chunkSize;
+            Array.Fill(buffer, Byte.MaxValue);
         }
 
-        public Chunk Rent(bool clear = false)
-        {
-            Allocated++;
-            Available = Math.Max(0, Available - 1);
+        return new Chunk(buffer);
+    }
 
-            var buffer = new byte[ChunkSize];
+    public void Return(ref Chunk chunk)
+    {
+        Assert.False(chunk.IsNull);
 
-            if (!clear)
-            {
-                Array.Fill(buffer, Byte.MaxValue);
-            }
-
-            return new Chunk(buffer);
-        }
-
-        public void Return(ref Chunk chunk)
-        {
-            Assert.False(chunk.IsNull);
-
-            chunk = default(Chunk);
-            Available++;
-            Allocated--;
-        }
+        chunk = default(Chunk);
+        Available++;
+        Allocated--;
     }
 }

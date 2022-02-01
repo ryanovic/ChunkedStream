@@ -1,213 +1,210 @@
-﻿namespace ChunkedStream
+﻿using System;
+using System.Collections.Generic;
+using System.Text;
+using System.Threading;
+
+/// <summary>
+/// <see cref="IChunkPool"/> interface implementation that uses a shared single buffer divided in multiple chunks.
+/// </summary>
+public unsafe sealed class ChunkPool : IChunkPool
 {
-    using System;
-    using System.Collections.Generic;
-    using System.Text;
-    using System.Threading;
+    private static long totalPoolAllocated;
+    private static long totalMemoryAllocated;
 
     /// <summary>
-    /// <see cref="IChunkPool"/> interface implementation that uses a shared single buffer divided in multiple chunks.
+    /// Returns a total number of bytes currently allocated in all buffers.
     /// </summary>
-    public unsafe sealed class ChunkPool : IChunkPool
+    public static long TotalPoolAllocated => Interlocked.Read(ref totalPoolAllocated);
+
+    /// <summary>
+    /// Returns a total number of bytes currently allocated on the heap, when a pool failed to return a chunk from its buffer.
+    /// </summary>
+    public static long TotalMemoryAllocated => Interlocked.Read(ref totalMemoryAllocated);
+
+    private const int MaxBufferLength = 0x7FFFFFC7;
+    private const int MinChunkSize = 4;
+    private const int MinChunkCount = 1;
+    private const int DefaultChunkSize = 64 * 1024;
+    private const int DefaultChunkCount = 64;
+
+    private readonly byte[] buffer;
+    private readonly int chunkSize;
+    private int next;
+    private SpinLock spinLock;
+
+    public int ChunkSize => chunkSize;
+
+    public ChunkPool()
+        : this(DefaultChunkSize, DefaultChunkCount)
     {
-        private static long totalPoolAllocated;
-        private static long totalMemoryAllocated;
+    }
 
-        /// <summary>
-        /// Returns a total number of bytes currently allocated in all buffers.
-        /// </summary>
-        public static long TotalPoolAllocated => Interlocked.Read(ref totalPoolAllocated);
+    public ChunkPool(int chunkSize, int chunkCount)
+    {
+        if (chunkSize < MinChunkSize) throw new ArgumentOutOfRangeException(nameof(chunkSize), Errors.PoolMinChunkSize(MinChunkSize));
+        if (chunkCount < MinChunkCount) throw new ArgumentOutOfRangeException(nameof(chunkCount), Errors.PoolMinChunkCount(MinChunkCount));
+        if ((long)chunkSize * chunkCount > MaxBufferLength) throw new InvalidOperationException(Errors.PoolMaxBufferSize(MaxBufferLength));
 
-        /// <summary>
-        /// Returns a total number of bytes currently allocated on the heap, when a pool failed to return a chunk from its buffer.
-        /// </summary>
-        public static long TotalMemoryAllocated => Interlocked.Read(ref totalMemoryAllocated);
+        this.buffer = new byte[chunkSize * chunkCount];
+        this.chunkSize = chunkSize;
+        InitializeBuffer(buffer, chunkSize);
+    }
 
-        private const int MaxBufferLength = 0x7FFFFFC7;
-        private const int MinChunkSize = 4;
-        private const int MinChunkCount = 1;
-        private const int DefaultChunkSize = 64 * 1024;
-        private const int DefaultChunkCount = 64;
+    /// <summary>
+    /// Gets a chunk from the pool if available.
+    /// </summary>
+    public bool TryRentFromPool(out Chunk chunk, bool clear = false)
+    {
+        chunk = default(Chunk);
 
-        private readonly byte[] buffer;
-        private readonly int chunkSize;
-        private int next;
-        private SpinLock spinLock;
+        var offset = GetNextOffset();
 
-        public int ChunkSize => chunkSize;
-
-        public ChunkPool()
-            : this(DefaultChunkSize, DefaultChunkCount)
+        if (offset != Chunk.InvalidHandle)
         {
+            chunk = CreateChunkFromPool(offset, clear);
+            return true;
         }
 
-        public ChunkPool(int chunkSize, int chunkCount)
-        {
-            if (chunkSize < MinChunkSize) throw new ArgumentOutOfRangeException(nameof(chunkSize), Errors.PoolMinChunkSize(MinChunkSize));
-            if (chunkCount < MinChunkCount) throw new ArgumentOutOfRangeException(nameof(chunkCount), Errors.PoolMinChunkCount(MinChunkCount));
-            if ((long)chunkSize * chunkCount > MaxBufferLength) throw new InvalidOperationException(Errors.PoolMaxBufferSize(MaxBufferLength));
+        return false;
+    }
 
-            this.buffer = new byte[chunkSize * chunkCount];
-            this.chunkSize = chunkSize;
-            InitializeBuffer(buffer, chunkSize);
+    /// <summary>
+    /// Gets a chunk from the pool, if available, or from the heap otherwise.
+    /// </summary>
+    public Chunk Rent(bool clear = false)
+    {
+        var offset = GetNextOffset();
+
+        if (offset != Chunk.InvalidHandle)
+        {
+            return CreateChunkFromPool(offset, clear);
         }
 
-        /// <summary>
-        /// Gets a chunk from the pool if available.
-        /// </summary>
-        public bool TryRentFromPool(out Chunk chunk, bool clear = false)
+        return CreateChunkFromMemory();
+    }
+
+    /// <summary>
+    /// Returns a chunk to the pool. 
+    /// </summary>
+    public void Return(ref Chunk chunk)
+    {
+        if (chunk.IsNull) throw new ArgumentException(Errors.ChunkIsNull(), nameof(chunk));
+
+        if (chunk.IsFromPool)
         {
-            chunk = default(Chunk);
-
-            var offset = GetNextOffset();
-
-            if (offset != Chunk.InvalidHandle)
+            if (chunk.Data.Array != buffer)
             {
-                chunk = CreateChunkFromPool(offset, clear);
-                return true;
+                throw new InvalidOperationException(Errors.ChunkIsImposter());
             }
 
-            return false;
+            Interlocked.Add(ref totalPoolAllocated, -ChunkSize);
+            Return(chunk.Handle);
+        }
+        else
+        {
+            Interlocked.Add(ref totalMemoryAllocated, -ChunkSize);
         }
 
-        /// <summary>
-        /// Gets a chunk from the pool, if available, or from the heap otherwise.
-        /// </summary>
-        public Chunk Rent(bool clear = false)
-        {
-            var offset = GetNextOffset();
+        chunk = default;
+    }
 
-            if (offset != Chunk.InvalidHandle)
+    /// <summary>
+    /// Check if the chunk belongs to this pool.
+    /// </summary>
+    public bool IsFromPool(in Chunk chunk)
+    {
+        return chunk.IsFromPool && chunk.Data.Array == buffer;
+    }
+
+    private Chunk CreateChunkFromPool(int offset, bool clear)
+    {
+        if (clear)
+        {
+            Array.Clear(buffer, offset, chunkSize);
+        }
+
+        var chunk = new Chunk(offset, new ArraySegment<byte>(buffer, offset, chunkSize));
+        Interlocked.Add(ref totalPoolAllocated, ChunkSize);
+        return chunk;
+    }
+
+    private Chunk CreateChunkFromMemory()
+    {
+        var chunk = new Chunk(new byte[chunkSize]);
+        Interlocked.Add(ref totalMemoryAllocated, ChunkSize);
+        return chunk;
+    }
+
+    private int GetNextOffset()
+    {
+        fixed (byte* pbuff = buffer)
+        {
+            if (next != Chunk.InvalidHandle)
             {
-                return CreateChunkFromPool(offset, clear);
+                return GetNextOffset(pbuff);
             }
 
-            return CreateChunkFromMemory();
+            return Chunk.InvalidHandle;
         }
+    }
 
-        /// <summary>
-        /// Returns a chunk to the pool. 
-        /// </summary>
-        public void Return(ref Chunk chunk)
+    private int GetNextOffset(byte* pbuff)
+    {
+        var lockTaken = false;
+        var offset = Chunk.InvalidHandle;
+
+        try
         {
-            if (chunk.IsNull) throw new ArgumentException(Errors.ChunkIsNull(), nameof(chunk));
+            spinLock.Enter(ref lockTaken);
 
-            if (chunk.IsFromPool)
+            if (next != Chunk.InvalidHandle)
             {
-                if (chunk.Data.Array != buffer)
-                {
-                    throw new InvalidOperationException(Errors.ChunkIsImposter());
-                }
-
-                Interlocked.Add(ref totalPoolAllocated, -ChunkSize);
-                Return(chunk.Handle);
-            }
-            else
-            {
-                Interlocked.Add(ref totalMemoryAllocated, -ChunkSize);
-            }
-
-            chunk = default;
-        }
-
-        /// <summary>
-        /// Check if the chunk belongs to this pool.
-        /// </summary>
-        public bool IsFromPool(in Chunk chunk)
-        {
-            return chunk.IsFromPool && chunk.Data.Array == buffer;
-        }
-
-        private Chunk CreateChunkFromPool(int offset, bool clear)
-        {
-            if (clear)
-            {
-                Array.Clear(buffer, offset, chunkSize);
-            }
-
-            var chunk = new Chunk(offset, new ArraySegment<byte>(buffer, offset, chunkSize));
-            Interlocked.Add(ref totalPoolAllocated, ChunkSize);
-            return chunk;
-        }
-
-        private Chunk CreateChunkFromMemory()
-        {
-            var chunk = new Chunk(new byte[chunkSize]);
-            Interlocked.Add(ref totalMemoryAllocated, ChunkSize);
-            return chunk;
-        }
-
-        private int GetNextOffset()
-        {
-            fixed (byte* pbuff = buffer)
-            {
-                if (next != Chunk.InvalidHandle)
-                {
-                    return GetNextOffset(pbuff);
-                }
-
-                return Chunk.InvalidHandle;
+                offset = this.next;
+                this.next = *(int*)(pbuff + next);
             }
         }
-
-        private int GetNextOffset(byte* pbuff)
+        finally
         {
-            var lockTaken = false;
-            var offset = Chunk.InvalidHandle;
+            if (lockTaken) spinLock.Exit();
+        }
+
+        return offset;
+    }
+
+    private void Return(int offset)
+    {
+        fixed (byte* pbuff = buffer)
+        {
+            bool lockTaken = false;
 
             try
             {
                 spinLock.Enter(ref lockTaken);
 
-                if (next != Chunk.InvalidHandle)
-                {
-                    offset = this.next;
-                    this.next = *(int*)(pbuff + next);
-                }
+                *(int*)(pbuff + offset) = this.next;
+                this.next = offset;
             }
             finally
             {
                 if (lockTaken) spinLock.Exit();
             }
-
-            return offset;
         }
+    }
 
-        private void Return(int offset)
+    private static void InitializeBuffer(byte[] buffer, int chunkSize)
+    {
+        fixed (byte* pbuff = buffer)
         {
-            fixed (byte* pbuff = buffer)
+            int offset = 0, next = chunkSize;
+
+            while (next < buffer.Length)
             {
-                bool lockTaken = false;
-
-                try
-                {
-                    spinLock.Enter(ref lockTaken);
-
-                    *(int*)(pbuff + offset) = this.next;
-                    this.next = offset;
-                }
-                finally
-                {
-                    if (lockTaken) spinLock.Exit();
-                }
+                *(int*)(pbuff + offset) = next;
+                offset = next;
+                next += chunkSize;
             }
-        }
 
-        private static void InitializeBuffer(byte[] buffer, int chunkSize)
-        {
-            fixed (byte* pbuff = buffer)
-            {
-                int offset = 0, next = chunkSize;
-
-                while (next < buffer.Length)
-                {
-                    *(int*)(pbuff + offset) = next;
-                    offset = next;
-                    next += chunkSize;
-                }
-
-                *(int*)(pbuff + offset) = Chunk.InvalidHandle;
-            }
+            *(int*)(pbuff + offset) = Chunk.InvalidHandle;
         }
     }
 }

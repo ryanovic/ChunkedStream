@@ -1,20 +1,19 @@
-﻿namespace ChunkedStream
+﻿using System;
+
+/// <summary>
+/// Represents a pool of chunks of specific size.
+/// </summary>
+public interface IChunkPool
 {
+    int ChunkSize { get; }
+
     /// <summary>
-    /// Represents a pool of chunks of specific size.
+    /// Gets a chunk from the pool.
     /// </summary>
-    public interface IChunkPool
-    {
-        int ChunkSize { get; }
+    Chunk Rent(bool clear = false);
 
-        /// <summary>
-        /// Gets a chunk from the pool.
-        /// </summary>
-        Chunk Rent(bool clear = false);
-
-        /// <summary>
-        /// Returns a chunk to the pool. 
-        /// </summary>
-        void Return(ref Chunk chunk);
-    }
+    /// <summary>
+    /// Returns a chunk to the pool. 
+    /// </summary>
+    void Return(ref Chunk chunk);
 }
