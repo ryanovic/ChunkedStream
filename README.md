@@ -47,4 +47,4 @@ Creates a `IBufferWriter<byte>` instance for the stream.
 
 ## Disposing
 
-A stream instance ***MUST*** be explicitly disposed to prevent chunks leaking from the pool. There is no override for the Finalize(destructor) method implemeted.
+A stream instance **MUST** be explicitly disposed to prevent chunks leaking from the pool. There is no override for the Finalize(destructor) method implemeted.
