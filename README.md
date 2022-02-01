@@ -1,5 +1,7 @@
 An in-memory stream implementation for .NET that uses a shared buffer to store data.
 
+[![NuGet version (ChunkedStream)](https://img.shields.io/nuget/v/ChunkedStream.svg?style=flat-square)](https://www.nuget.org/packages/ChunkedStream/)
+
 ## Overview
 
 A `ChunkedStream` instance reads and writes data using bytes buffers from a shared pool. The pool is a single, presumably large enough array allocated on the managed heap and divided into chunks(exact number and size of which are specified in the constructor). When the stream is closed or truncated, unused chunks are returned to the pool and become available to other stream instances. In situations, when there are no chunks left in the pool - an extra one will be allocated on the heap to satisfy a pending request. Such chunks are not returned and will be released by GC when no longer needed.
