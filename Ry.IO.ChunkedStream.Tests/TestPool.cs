@@ -27,7 +27,10 @@
 
             if (!clear)
             {
-                Array.Fill(buffer, Byte.MaxValue);
+                for (int i = 0; i < buffer.Length; i++)
+                {
+                    buffer[i] = Byte.MaxValue;
+                }
             }
 
             return new Chunk(buffer);

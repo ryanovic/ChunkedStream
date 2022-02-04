@@ -14,28 +14,20 @@
     /// </summary>
     public sealed class ChunkedStream : Stream
     {
-        private const int DefaultChunkArraySize = 4;
-
         private readonly IChunkPool chunkPool;
-        private readonly ArrayPool<Chunk> arrayPool;
 
         private Chunk[] chunks;
         private long length;
         private long position;
 
         public ChunkedStream(IChunkPool chunkPool)
-            : this(chunkPool, EmptyChunkArrayPool.Instance)
         {
-        }
+            const int ChunkArraySize = 4;
 
-        public ChunkedStream(IChunkPool chunkPool, ArrayPool<Chunk> arrayPool)
-        {
             if (chunkPool == null) throw new ArgumentNullException(nameof(chunkPool));
-            if (arrayPool == null) throw new ArgumentNullException(nameof(arrayPool));
 
             this.chunkPool = chunkPool;
-            this.arrayPool = arrayPool;
-            this.chunks = arrayPool.Rent(DefaultChunkArraySize);
+            this.chunks = new Chunk[ChunkArraySize];
         }
 
         /// <summary>
@@ -439,7 +431,6 @@
 
                     Debug.Assert(chunks.All(x => x.IsNull));
 
-                    arrayPool.Return(chunks);
                     position = length = 0;
                     chunks = null;
                 }
@@ -579,12 +570,11 @@
         {
             if (index >= chunks.Length)
             {
-                var temp = arrayPool.Rent(index + 1);
-
-                Debug.Assert(temp.All(x => x.IsNull));
+                var temp = index == chunks.Length
+                    ? new Chunk[2 * chunks.Length]
+                    : new Chunk[GetBufferSize(index + 1)];
 
                 chunks.CopyTo(temp, 0);
-                arrayPool.Return(chunks, clearArray: true);
                 chunks = temp;
             }
         }
@@ -595,6 +585,28 @@
             {
                 chunkPool.Return(ref chunk);
             }
+        }
+
+        private static int GetBufferSize(int minimumLength)
+        {
+            const int MaxLengthToAlign = 0x40000000;
+
+            if (minimumLength > MaxLengthToAlign)
+            {
+                return minimumLength;
+            }
+
+            // Round up to the next highest power of 2.
+            // https://graphics.stanford.edu/~seander/bithacks.html#RoundUpPowerOf2
+            minimumLength--;
+            minimumLength |= minimumLength >> 1;
+            minimumLength |= minimumLength >> 2;
+            minimumLength |= minimumLength >> 4;
+            minimumLength |= minimumLength >> 8;
+            minimumLength |= minimumLength >> 16;
+            minimumLength++;
+
+            return minimumLength;
         }
 
         private sealed class BufferWriter : IBufferWriter<byte>

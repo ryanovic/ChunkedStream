@@ -156,6 +156,7 @@
         [InlineData(0, new byte[] { 99, 99, 0, 0 })]
         [InlineData(3, new byte[] { 0, 0, 0, 99, 99 })]
         [InlineData(6, new byte[] { 0, 0, 0, 0, 0, 0, 99, 99 })]
+        [InlineData(12, new byte[] { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 99, 99 })]
         public void Writes_Byte_At_Position_Of_Empty_Stream(int position, byte[] expected)
         {
             var pool = new TestPool(chunkSize: 2);

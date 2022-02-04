@@ -12,7 +12,7 @@
         public void Holds_Under_Presure()
         {
             const int N = 1000;
-
+            
             var pool = new ChunkPool(8, 1);
 
             Parallel.For(0, N, _ =>
@@ -23,22 +23,19 @@
                 {
                     if (pool.TryRentFromPool(out var chunk))
                     {
-                        var span = chunk.Data.AsSpan(4, 4);
-                        var num = BitConverter.ToInt32(span);
-                        BitConverter.GetBytes(num + 1).AsSpan().CopyTo(span);
+                        var num = BitConverter.ToInt32(chunk.Data.Array, 4);
+                        BitConverter.GetBytes(num + 1).CopyTo(chunk.Data.Array, 4);
                         pool.Return(ref chunk);
                         updated = true;
                     }
                 }
             });
 
-            var chunk = pool.Rent();
-            var span_1 = chunk.Data.AsSpan(0, 4);
-            var span_2 = chunk.Data.AsSpan(4, 4);
+            var chunk_final = pool.Rent();
 
-            Assert.True(chunk.IsFromPool);
-            Assert.Equal(Chunk.InvalidHandle, BitConverter.ToInt32(span_1));
-            Assert.Equal(N, BitConverter.ToInt32(span_2));
+            Assert.True(chunk_final.IsFromPool);
+            Assert.Equal(Chunk.InvalidHandle, BitConverter.ToInt32(chunk_final.Data.Array, 0));
+            Assert.Equal(N, BitConverter.ToInt32(chunk_final.Data.Array, 4));
         }
 
         [Fact]
