@@ -243,7 +243,7 @@
             {
                 (var index, var offset) = GetChunkPositionToWrite();
 
-                var target = chunks[index].Data.AsSpan(offset);
+                var target = chunks[index].AsSpan(offset);
                 var toWrite = Math.Min(buffer.Length, target.Length);
 
                 Debug.Assert(toWrite > 0);
