@@ -2,13 +2,14 @@
 {
     using System;
     using System.Collections.Generic;
+    using System.Runtime.CompilerServices;
     using System.Text;
     using System.Threading;
 
     /// <summary>
     /// <see cref="IChunkPool"/> interface implementation that uses a shared single buffer divided in multiple chunks.
     /// </summary>
-    public unsafe sealed class ChunkPool : IChunkPool
+    public sealed class ChunkPool : IChunkPool
     {
         private static long totalPoolAllocated;
         private static long totalMemoryAllocated;
@@ -139,19 +140,6 @@
 
         private int GetNextOffset()
         {
-            fixed (byte* pbuff = buffer)
-            {
-                if (next != Chunk.InvalidHandle)
-                {
-                    return GetNextOffset(pbuff);
-                }
-
-                return Chunk.InvalidHandle;
-            }
-        }
-
-        private int GetNextOffset(byte* pbuff)
-        {
             var lockTaken = false;
             var offset = Chunk.InvalidHandle;
 
@@ -162,7 +150,7 @@
                 if (next != Chunk.InvalidHandle)
                 {
                     offset = this.next;
-                    this.next = *(int*)(pbuff + next);
+                    this.next = Unsafe.As<byte, int>(ref buffer[next]);
                 }
             }
             finally
@@ -175,39 +163,33 @@
 
         private void Return(int offset)
         {
-            fixed (byte* pbuff = buffer)
+            bool lockTaken = false;
+
+            try
             {
-                bool lockTaken = false;
+                spinLock.Enter(ref lockTaken);
 
-                try
-                {
-                    spinLock.Enter(ref lockTaken);
-
-                    *(int*)(pbuff + offset) = this.next;
-                    this.next = offset;
-                }
-                finally
-                {
-                    if (lockTaken) spinLock.Exit();
-                }
+                Unsafe.As<byte, int>(ref buffer[offset]) = this.next;
+                this.next = offset;
+            }
+            finally
+            {
+                if (lockTaken) spinLock.Exit();
             }
         }
 
         private static void InitializeBuffer(byte[] buffer, int chunkSize)
         {
-            fixed (byte* pbuff = buffer)
+            int offset = 0, next = chunkSize;
+
+            while (next < buffer.Length)
             {
-                int offset = 0, next = chunkSize;
-
-                while (next < buffer.Length)
-                {
-                    *(int*)(pbuff + offset) = next;
-                    offset = next;
-                    next += chunkSize;
-                }
-
-                *(int*)(pbuff + offset) = Chunk.InvalidHandle;
+                Unsafe.As<byte, int>(ref buffer[offset]) = next;
+                offset = next;
+                next += chunkSize;
             }
+
+            Unsafe.As<byte, int>(ref buffer[offset]) = Chunk.InvalidHandle;
         }
     }
 }
