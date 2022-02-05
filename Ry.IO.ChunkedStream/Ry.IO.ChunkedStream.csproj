@@ -14,7 +14,7 @@
     <RepositoryType>git</RepositoryType>
     <RepositoryUrl>https://github.com/ryanovic/ChunkedStream</RepositoryUrl>
     <PackageTags>IO memory pool chunked stream</PackageTags>
-    <Version>1.0.2</Version>
+    <Version>2.0.0</Version>
   </PropertyGroup>
 
   <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
