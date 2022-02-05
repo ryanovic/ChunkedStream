@@ -14,20 +14,20 @@
     /// </summary>
     public sealed class ChunkedStream : Stream
     {
-        private readonly IChunkPool chunkPool;
+        private const int MinChunkArraySize = 4;
+        private const int MaxChunkArraySize = 0x40000000;
 
+        private readonly IChunkPool chunkPool;
         private Chunk[] chunks;
         private long length;
         private long position;
 
         public ChunkedStream(IChunkPool chunkPool)
         {
-            const int ChunkArraySize = 4;
-
             if (chunkPool == null) throw new ArgumentNullException(nameof(chunkPool));
 
             this.chunkPool = chunkPool;
-            this.chunks = new Chunk[ChunkArraySize];
+            this.chunks = new Chunk[MinChunkArraySize];
         }
 
         /// <summary>
@@ -552,9 +552,9 @@
             var chunkIndex = offset / ChunkSize;
             var chunkOffset = (int)(offset % ChunkSize);
 
-            if (chunkIndex > Int32.MaxValue)
+            if (chunkIndex > MaxChunkArraySize)
             {
-                throw new InvalidOperationException(Errors.StreamMaxSize());
+                throw new OutOfMemoryException(Errors.StreamMaxSize());
             }
 
             if (upperBound && chunkOffset == 0)
@@ -570,10 +570,12 @@
         {
             if (index >= chunks.Length)
             {
-                var temp = index == chunks.Length
-                    ? new Chunk[2 * chunks.Length]
-                    : new Chunk[GetBufferSize(index + 1)];
+                if (index == MaxChunkArraySize)
+                {
+                    throw new OutOfMemoryException(Errors.StreamMaxSize());
+                }
 
+                var temp = new Chunk[GetBufferSize(index + 1)];
                 chunks.CopyTo(temp, 0);
                 chunks = temp;
             }
@@ -589,13 +591,6 @@
 
         private static int GetBufferSize(int minimumLength)
         {
-            const int MaxLengthToAlign = 0x40000000;
-
-            if (minimumLength > MaxLengthToAlign)
-            {
-                return minimumLength;
-            }
-
             // Round up to the next highest power of 2.
             // https://graphics.stanford.edu/~seander/bithacks.html#RoundUpPowerOf2
             minimumLength--;

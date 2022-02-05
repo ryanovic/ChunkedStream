@@ -99,9 +99,9 @@
                 {
                     throw new InvalidOperationException(Errors.ChunkIsImposter());
                 }
-
-                Interlocked.Add(ref totalPoolAllocated, -ChunkSize);
+                                
                 Return(chunk.Handle);
+                Interlocked.Add(ref totalPoolAllocated, -ChunkSize);
             }
             else
             {
